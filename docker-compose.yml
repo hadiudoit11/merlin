@@ -1,0 +1,78 @@
+version: "3.8"
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: merlin-db
+    environment:
+      POSTGRES_USER: merlin
+      POSTGRES_PASSWORD: merlin_dev
+      POSTGRES_DB: merlin
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U merlin -d merlin"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - merlin-network
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: merlin-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://merlin:merlin_dev@db:5432/merlin
+      - DEBUG=true
+      - CORS_ORIGINS_STR=http://localhost:3000,http://localhost:3001,http://localhost:3002
+      - AUTH0_DOMAIN=${AUTH0_DOMAIN:-}
+      - AUTH0_API_AUDIENCE=${AUTH0_API_AUDIENCE:-}
+      - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID:-}
+      - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    networks:
+      - merlin-network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Next.js Frontend (optional - can also run locally)
+  frontend:
+    build:
+      context: ../Merlin-fe
+      dockerfile: Dockerfile
+    container_name: merlin-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_USE_MOCK_API=false
+      - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID:-}
+      - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET:-}
+      - AUTH0_ISSUER=${AUTH0_ISSUER:-}
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-development-secret}
+    depends_on:
+      - backend
+    networks:
+      - merlin-network
+    profiles:
+      - full-stack
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  merlin-network:
+    driver: bridge
