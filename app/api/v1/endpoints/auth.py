@@ -154,21 +154,20 @@ async def get_or_create_dev_user(session: AsyncSession) -> User:
     return user
 
 
-async def get_current_user(
-    request: Request,
-    token: Optional[str] = Depends(oauth2_scheme),
-    session: AsyncSession = Depends(get_session)
+async def validate_token_and_get_user(
+    token: str,
+    session: AsyncSession,
+    request: Optional[Request] = None,
 ) -> User:
-    # In DEBUG mode, allow unauthenticated access with a dev user
-    if settings.DEBUG and not token:
-        return await get_or_create_dev_user(session)
-
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    """
+    Core token validation logic. Can be called from deps.py or directly.
+    Supports MCP tokens, Auth0 tokens, and legacy JWT tokens.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
     # Check if it's an MCP token (44 char base64url tokens from secrets.token_urlsafe(32))
     # These tokens are longer than JWTs which have 3 dot-separated parts
@@ -182,12 +181,6 @@ async def get_current_user(
             detail="Invalid or expired API token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
 
     # Try Auth0 validation first (if configured)
     if settings.USE_AUTH0:
@@ -220,6 +213,28 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     return user
+
+
+async def get_current_user(
+    token: Optional[str] = Depends(oauth2_scheme),
+    session: AsyncSession = Depends(get_session)
+) -> User:
+    """
+    FastAPI dependency for getting the current authenticated user.
+    This is the main entry point used by route handlers.
+    """
+    # In DEBUG mode, allow unauthenticated access with a dev user
+    if settings.DEBUG and not token:
+        return await get_or_create_dev_user(session)
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return await validate_token_and_get_user(token, session)
 
 
 @router.post("/register", response_model=UserResponse)

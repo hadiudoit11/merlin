@@ -170,11 +170,11 @@ async def get_current_user(
     if settings.USE_AUTH0 and credentials:
         return await get_current_user_from_auth0(credentials, session)
 
-    # Fall back to legacy JWT if Auth0 not configured
+    # Fall back to legacy JWT/MCP token if Auth0 not configured
     if token:
-        # Import legacy auth for backwards compatibility
-        from app.api.v1.endpoints.auth import get_current_user as legacy_get_current_user
-        return await legacy_get_current_user(token, session)
+        # Import token validation for backwards compatibility
+        from app.api.v1.endpoints.auth import validate_token_and_get_user
+        return await validate_token_and_get_user(token, session)
 
     # In DEBUG mode, allow unauthenticated access with dev user
     if settings.DEBUG and not credentials and not token:

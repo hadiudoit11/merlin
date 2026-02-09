@@ -188,7 +188,7 @@ async def revoke_token(
 async def validate_mcp_token(
     raw_token: str,
     session: AsyncSession,
-    request: Request,
+    request: Optional[Request] = None,
 ) -> Optional[User]:
     """
     Validate an MCP token and return the associated user.
@@ -213,7 +213,7 @@ async def validate_mcp_token(
 
     # Update usage stats
     mcp_token.last_used_at = datetime.utcnow()
-    mcp_token.last_ip = request.client.host if request.client else None
+    mcp_token.last_ip = request.client.host if request and request.client else None
     mcp_token.use_count = (mcp_token.use_count or 0) + 1
     await session.commit()
 
