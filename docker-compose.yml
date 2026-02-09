@@ -1,36 +1,35 @@
-# Typequest Full Stack - Docker Compose
+# Merlin Full Stack - Docker Compose
 # Usage:
 #   Development: docker compose up
 #   Production:  docker compose --profile production up
 #   Full stack:  docker compose --profile full-stack up
-
-version: "3.8"
+#   DB only:     docker compose -f docker-compose.db.yml up
 
 services:
   # ==================== PostgreSQL Database ====================
   db:
     image: postgres:16-alpine
-    container_name: typequest-db
+    container_name: merlin-db
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-typequest}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-typequest_dev}
-      POSTGRES_DB: ${POSTGRES_DB:-typequest}
+      POSTGRES_USER: merlin
+      POSTGRES_PASSWORD: merlin_dev_password
+      POSTGRES_DB: merlin
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-typequest} -d ${POSTGRES_DB:-typequest}"]
+      test: ["CMD-SHELL", "pg_isready -U merlin -d merlin"]
       interval: 5s
       timeout: 5s
       retries: 5
     networks:
-      - typequest-network
+      - merlin-network
 
   # ==================== Redis (for caching/sessions) ====================
   redis:
     image: redis:7-alpine
-    container_name: typequest-redis
+    container_name: merlin-redis
     ports:
       - "6379:6379"
     volumes:
@@ -41,7 +40,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - typequest-network
+      - merlin-network
     profiles:
       - full-stack
       - production
@@ -52,19 +51,19 @@ services:
       context: .
       dockerfile: Dockerfile
       target: development
-    container_name: typequest-backend
+    container_name: merlin-backend
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-typequest}:${POSTGRES_PASSWORD:-typequest_dev}@db:5432/${POSTGRES_DB:-typequest}
+      - DATABASE_URL=postgresql+asyncpg://merlin:merlin_dev_password@db:5432/merlin
       - DEBUG=true
       - CORS_ORIGINS_STR=http://localhost:3000,http://localhost:3001
-      - AUTH0_DOMAIN=${AUTH0_DOMAIN:-}
-      - AUTH0_API_AUDIENCE=${AUTH0_API_AUDIENCE:-}
-      - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID:-}
-      - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET:-}
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
-      - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY:-}
+      - AUTH0_DOMAIN=${AUTH0_DOMAIN}
+      - AUTH0_API_AUDIENCE=${AUTH0_API_AUDIENCE}
+      - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}
+      - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET}
+      - SECRET_KEY=${SECRET_KEY}
+      - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY}
     depends_on:
       db:
         condition: service_healthy
@@ -73,7 +72,7 @@ services:
       - /app/__pycache__
       - /app/.git
     networks:
-      - typequest-network
+      - merlin-network
 
   # ==================== FastAPI Backend (Production) ====================
   backend-prod:
@@ -81,13 +80,13 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
-    container_name: typequest-backend-prod
+    container_name: merlin-backend-prod
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-typequest}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-typequest}
+      - DATABASE_URL=postgresql+asyncpg://merlin:merlin_dev_password@db:5432/merlin
       - DEBUG=false
-      - CORS_ORIGINS_STR=${CORS_ORIGINS_STR:-}
+      - CORS_ORIGINS_STR=${CORS_ORIGINS_STR}
       - AUTH0_DOMAIN=${AUTH0_DOMAIN}
       - AUTH0_API_AUDIENCE=${AUTH0_API_AUDIENCE}
       - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}
@@ -100,7 +99,7 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - typequest-network
+      - merlin-network
     profiles:
       - production
 
@@ -110,17 +109,17 @@ services:
       context: ../Merlin-fe
       dockerfile: Dockerfile
       target: development
-    container_name: typequest-frontend
+    container_name: merlin-frontend
     ports:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
       - NEXT_PUBLIC_USE_MOCK_API=false
-      - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID:-}
-      - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET:-}
-      - AUTH0_ISSUER=${AUTH0_ISSUER:-}
+      - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}
+      - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET}
+      - AUTH0_ISSUER=${AUTH0_ISSUER}
       - NEXTAUTH_URL=http://localhost:3000
-      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-development-secret}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
     depends_on:
       - backend
     volumes:
@@ -128,7 +127,7 @@ services:
       - /app/node_modules
       - /app/.next
     networks:
-      - typequest-network
+      - merlin-network
     profiles:
       - full-stack
 
@@ -139,9 +138,9 @@ services:
       dockerfile: Dockerfile
       target: production
       args:
-        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
         - NEXT_PUBLIC_USE_MOCK_API=false
-    container_name: typequest-frontend-prod
+    container_name: merlin-frontend-prod
     ports:
       - "3000:3000"
     environment:
@@ -153,14 +152,14 @@ services:
     depends_on:
       - backend-prod
     networks:
-      - typequest-network
+      - merlin-network
     profiles:
       - production
 
   # ==================== Nginx Reverse Proxy (Production) ====================
   nginx:
     image: nginx:alpine
-    container_name: typequest-nginx
+    container_name: merlin-nginx
     ports:
       - "80:80"
       - "443:443"
@@ -171,7 +170,7 @@ services:
       - frontend-prod
       - backend-prod
     networks:
-      - typequest-network
+      - merlin-network
     profiles:
       - production
 
@@ -182,5 +181,5 @@ volumes:
     driver: local
 
 networks:
-  typequest-network:
+  merlin-network:
     driver: bridge

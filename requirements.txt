@@ -9,6 +9,7 @@ alembic>=1.13.0
 greenlet>=3.0.0
 asyncpg>=0.29.0
 aiosqlite>=0.19.0
+psycopg2-binary>=2.9.9
 
 # Validation & Settings
 pydantic>=2.6.0
