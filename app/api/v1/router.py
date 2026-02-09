@@ -1,10 +1,11 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import canvases, nodes, okrs, metrics, auth, organizations, integrations, templates, settings, zoom, jira, tasks, mcp, agent
+from app.api.v1.endpoints import canvases, nodes, okrs, metrics, auth, organizations, integrations, templates, settings, zoom, jira, tasks, mcp, agent, tokens
 
 api_router = APIRouter()
 
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(tokens.router, prefix="/tokens", tags=["tokens"])
 api_router.include_router(organizations.router, prefix="/organizations", tags=["organizations"])
 api_router.include_router(canvases.router, prefix="/canvases", tags=["canvases"])
 api_router.include_router(nodes.router, prefix="/nodes", tags=["nodes"])

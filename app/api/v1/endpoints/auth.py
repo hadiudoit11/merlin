@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -6,8 +6,13 @@ from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from typing import Optional, Dict, Any
+import logging
+import uuid
 
 from app.core.config import settings
+
+# Configure structured logging
+logger = logging.getLogger(__name__)
 from app.core.database import get_session
 from app.core.auth0 import auth0_validator, Auth0TokenError, Auth0ConfigError
 from app.models.user import User
@@ -150,6 +155,7 @@ async def get_or_create_dev_user(session: AsyncSession) -> User:
 
 
 async def get_current_user(
+    request: Request,
     token: Optional[str] = Depends(oauth2_scheme),
     session: AsyncSession = Depends(get_session)
 ) -> User:
@@ -161,6 +167,19 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Check if it's an MCP token (44 char base64url tokens from secrets.token_urlsafe(32))
+    # These tokens are longer than JWTs which have 3 dot-separated parts
+    if "." not in token and len(token) > 40:
+        from app.api.v1.endpoints.tokens import validate_mcp_token
+        user = await validate_mcp_token(token, session, request)
+        if user:
+            return user
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired API token",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -206,26 +225,83 @@ async def get_current_user(
 @router.post("/register", response_model=UserResponse)
 async def register(
     user_data: UserCreate,
+    request: Request,
     session: AsyncSession = Depends(get_session)
 ):
+    request_id = str(uuid.uuid4())[:8]
+
+    logger.info(
+        f"[{request_id}] Registration attempt",
+        extra={
+            "request_id": request_id,
+            "email": user_data.email,
+            "has_full_name": bool(user_data.full_name),
+            "client_ip": request.client.host if request.client else "unknown",
+        }
+    )
+
     # Check if user exists
     result = await session.execute(select(User).where(User.email == user_data.email))
-    if result.scalar_one_or_none():
+    existing_user = result.scalar_one_or_none()
+
+    if existing_user:
+        logger.warning(
+            f"[{request_id}] Registration failed: email already exists",
+            extra={
+                "request_id": request_id,
+                "email": user_data.email,
+                "existing_user_id": existing_user.id,
+                "existing_user_created": existing_user.created_at.isoformat() if existing_user.created_at else None,
+            }
+        )
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "EMAIL_ALREADY_REGISTERED",
+                "message": "An account with this email already exists",
+                "request_id": request_id,
+            }
         )
 
     # Create user
-    user = User(
-        email=user_data.email,
-        hashed_password=get_password_hash(user_data.password),
-        full_name=user_data.full_name,
-    )
-    session.add(user)
-    await session.commit()
-    await session.refresh(user)
-    return user
+    try:
+        user = User(
+            email=user_data.email,
+            hashed_password=get_password_hash(user_data.password),
+            full_name=user_data.full_name,
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+
+        logger.info(
+            f"[{request_id}] Registration successful",
+            extra={
+                "request_id": request_id,
+                "user_id": user.id,
+                "email": user.email,
+            }
+        )
+        return user
+
+    except Exception as e:
+        logger.error(
+            f"[{request_id}] Registration failed: database error",
+            extra={
+                "request_id": request_id,
+                "email": user_data.email,
+                "error": str(e),
+            },
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "REGISTRATION_FAILED",
+                "message": "Failed to create account. Please try again.",
+                "request_id": request_id,
+            }
+        )
 
 
 @router.post("/login", response_model=Token)
@@ -257,19 +333,91 @@ class LoginRequest(BaseModel):
 @router.post("/login/")
 async def login_json(
     login_data: LoginRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session)
 ):
     """JSON login endpoint for NextAuth credentials provider."""
+    request_id = str(uuid.uuid4())[:8]
+
+    logger.info(
+        f"[{request_id}] Login attempt",
+        extra={
+            "request_id": request_id,
+            "email": login_data.email,
+            "client_ip": request.client.host if request.client else "unknown",
+        }
+    )
+
     result = await session.execute(select(User).where(User.email == login_data.email))
     user = result.scalar_one_or_none()
 
-    if not user or not user.hashed_password or not verify_password(login_data.password, user.hashed_password):
+    if not user:
+        logger.warning(
+            f"[{request_id}] Login failed: user not found",
+            extra={
+                "request_id": request_id,
+                "email": login_data.email,
+                "reason": "USER_NOT_FOUND",
+            }
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail={
+                "code": "INVALID_CREDENTIALS",
+                "message": "Incorrect email or password",
+                "request_id": request_id,
+            }
+        )
+
+    if not user.hashed_password:
+        logger.warning(
+            f"[{request_id}] Login failed: no password set (OAuth user)",
+            extra={
+                "request_id": request_id,
+                "email": login_data.email,
+                "user_id": user.id,
+                "reason": "NO_PASSWORD_SET",
+                "has_auth0_id": bool(user.auth0_id),
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "OAUTH_USER",
+                "message": "This account was created with Google/Auth0. Please sign in with that method.",
+                "request_id": request_id,
+            }
+        )
+
+    if not verify_password(login_data.password, user.hashed_password):
+        logger.warning(
+            f"[{request_id}] Login failed: incorrect password",
+            extra={
+                "request_id": request_id,
+                "email": login_data.email,
+                "user_id": user.id,
+                "reason": "WRONG_PASSWORD",
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "INVALID_CREDENTIALS",
+                "message": "Incorrect email or password",
+                "request_id": request_id,
+            }
         )
 
     access_token = create_access_token(user.id)
+
+    logger.info(
+        f"[{request_id}] Login successful",
+        extra={
+            "request_id": request_id,
+            "user_id": user.id,
+            "email": user.email,
+        }
+    )
 
     return {
         "id": str(user.id),
