@@ -247,6 +247,40 @@ async def login(
     return Token(access_token=access_token)
 
 
+from pydantic import BaseModel
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+@router.post("/login/")
+async def login_json(
+    login_data: LoginRequest,
+    session: AsyncSession = Depends(get_session)
+):
+    """JSON login endpoint for NextAuth credentials provider."""
+    result = await session.execute(select(User).where(User.email == login_data.email))
+    user = result.scalar_one_or_none()
+
+    if not user or not user.hashed_password or not verify_password(login_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+        )
+
+    access_token = create_access_token(user.id)
+
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "name": user.full_name,
+        "image": user.picture,
+        "access_token": access_token,
+        "access_token_expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    }
+
+
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user

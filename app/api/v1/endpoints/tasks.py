@@ -249,7 +249,28 @@ async def create_task(
     await session.commit()
     await session.refresh(task)
 
-    return TaskResponse.model_validate(task)
+    # For a new task, linked_nodes is empty - avoid lazy loading issue
+    return TaskResponse(
+        id=task.id,
+        title=task.title,
+        description=task.description,
+        assignee_name=task.assignee_name,
+        assignee_email=task.assignee_email,
+        due_date=task.due_date,
+        due_date_text=task.due_date_text,
+        status=task.status,
+        priority=task.priority,
+        source=task.source,
+        source_id=task.source_id,
+        source_url=task.source_url,
+        context=task.context,
+        canvas_id=task.canvas_id,
+        tags=task.tags or [],
+        is_overdue=task.is_overdue,
+        linked_nodes=[],  # New task has no linked nodes
+        created_at=task.created_at,
+        updated_at=task.updated_at,
+    )
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
@@ -316,7 +337,12 @@ async def update_task(
         task.completed_at = datetime.utcnow()
 
     await session.commit()
-    await session.refresh(task)
+
+    # Re-fetch with relationship loaded
+    result = await session.execute(
+        select(Task).options(selectinload(Task.linked_nodes)).where(Task.id == task_id)
+    )
+    task = result.scalar_one()
 
     return TaskResponse.model_validate(task)
 
@@ -394,7 +420,12 @@ async def link_task_to_node(
     if node not in task.linked_nodes:
         task.linked_nodes.append(node)
         await session.commit()
-        await session.refresh(task)
+
+    # Re-fetch with relationship loaded
+    result = await session.execute(
+        select(Task).options(selectinload(Task.linked_nodes)).where(Task.id == task_id)
+    )
+    task = result.scalar_one()
 
     return TaskResponse.model_validate(task)
 
@@ -432,7 +463,12 @@ async def unlink_task_from_node(
         if node.id == node_id:
             task.linked_nodes.remove(node)
             await session.commit()
-            await session.refresh(task)
             break
+
+    # Re-fetch with relationship loaded
+    result = await session.execute(
+        select(Task).options(selectinload(Task.linked_nodes)).where(Task.id == task_id)
+    )
+    task = result.scalar_one()
 
     return TaskResponse.model_validate(task)

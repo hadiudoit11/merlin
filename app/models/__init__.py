@@ -38,6 +38,13 @@ from app.models.task import (
     TaskSource,
     task_node_links,
 )
+from app.models.mcp import (
+    MCPToken,
+    MCPAuditLog,
+    MCPActionStatus,
+    MCP_SCOPES,
+    TOOL_REQUIRED_SCOPES,
+)
 
 __all__ = [
     "User",
@@ -73,4 +80,9 @@ __all__ = [
     "TaskPriority",
     "TaskSource",
     "task_node_links",
+    "MCPToken",
+    "MCPAuditLog",
+    "MCPActionStatus",
+    "MCP_SCOPES",
+    "TOOL_REQUIRED_SCOPES",
 ]

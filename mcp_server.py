@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MCP Server for Merlin Canvas
+MCP Server for Typequest Canvas
 
 Exposes canvas management, templates, tasks, and integrations via MCP protocol.
 This allows Claude and other AI agents to:
@@ -10,10 +10,18 @@ This allows Claude and other AI agents to:
 - Process meeting transcripts and action items
 
 Run with: python mcp_server.py
+
+Environment variables:
+- MCP_USER_ID: User ID for audit logging (required for logging)
+- MCP_TOKEN_ID: Token ID for audit logging
+- MCP_SESSION_ID: Session ID for tracking
+- MCP_ENABLE_AUDIT: Enable audit logging (default: true)
 """
 
 import asyncio
 import json
+import os
+import time
 from typing import Any, Optional, List
 from datetime import datetime
 import sys
@@ -35,11 +43,58 @@ from app.models.template import NodeTemplateContext, TemplateScope, SYSTEM_DEFAU
 from app.models.task import Task, TaskStatus, TaskPriority, TaskSource, InputEvent
 from app.models.integration import Integration, IntegrationProvider, MeetingImport
 from app.models.node import Node
+from app.models.mcp import MCPAuditLog, MCPActionStatus
 from app.services import template_service
 
 
+# Configuration from environment
+MCP_USER_ID = os.getenv("MCP_USER_ID")
+MCP_TOKEN_ID = os.getenv("MCP_TOKEN_ID")
+MCP_SESSION_ID = os.getenv("MCP_SESSION_ID", "local")
+MCP_ENABLE_AUDIT = os.getenv("MCP_ENABLE_AUDIT", "true").lower() == "true"
+
+
 # Create MCP server
-server = Server("merlin-canvas")
+server = Server("typequest-canvas")
+
+
+# ============ Audit Logging ============
+
+async def log_mcp_action(
+    tool_name: str,
+    arguments: dict,
+    status: MCPActionStatus,
+    duration_ms: int,
+    error_message: str | None = None,
+    result_summary: str | None = None,
+    canvas_id: int | None = None,
+    node_id: int | None = None,
+):
+    """Log an MCP tool call to the audit log"""
+    if not MCP_ENABLE_AUDIT or not MCP_USER_ID:
+        return
+
+    try:
+        async with async_session_maker() as session:
+            log = MCPAuditLog(
+                user_id=int(MCP_USER_ID),
+                token_id=int(MCP_TOKEN_ID) if MCP_TOKEN_ID else None,
+                action="tool_call",
+                tool_name=tool_name,
+                arguments=arguments,
+                status=status.value,
+                error_message=error_message,
+                result_summary=result_summary,
+                canvas_id=canvas_id,
+                node_id=node_id,
+                session_id=MCP_SESSION_ID,
+                duration_ms=duration_ms,
+            )
+            session.add(log)
+            await session.commit()
+    except Exception as e:
+        # Don't fail the tool call if logging fails
+        print(f"Warning: Failed to log MCP action: {e}", file=sys.stderr)
 
 
 # ============ Tool Definitions ============
@@ -328,7 +383,7 @@ async def list_tools() -> list[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-    """Route tool calls to handlers."""
+    """Route tool calls to handlers with audit logging."""
     handlers = {
         # Templates
         "list_templates": handle_list_templates,
@@ -355,10 +410,51 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     }
 
     handler = handlers.get(name)
-    if handler:
-        return await handler(arguments)
-    else:
+    if not handler:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
+
+    # Execute with timing and audit logging
+    start_time = time.time()
+    error_message = None
+    status = MCPActionStatus.SUCCESS
+
+    try:
+        result = await handler(arguments)
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        # Extract canvas_id/node_id from arguments for context
+        canvas_id = arguments.get("canvas_id")
+        node_id = arguments.get("node_id") or arguments.get("task_id")
+
+        # Log successful action
+        await log_mcp_action(
+            tool_name=name,
+            arguments=arguments,
+            status=status,
+            duration_ms=duration_ms,
+            canvas_id=canvas_id,
+            node_id=node_id,
+            result_summary=f"Executed {name} successfully",
+        )
+
+        return result
+
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        error_message = str(e)
+        status = MCPActionStatus.ERROR
+
+        # Log failed action
+        await log_mcp_action(
+            tool_name=name,
+            arguments=arguments,
+            status=status,
+            duration_ms=duration_ms,
+            error_message=error_message,
+            canvas_id=arguments.get("canvas_id"),
+        )
+
+        return [TextContent(type="text", text=f"Error: {error_message}")]
 
 
 # ============ Template Handlers ============
