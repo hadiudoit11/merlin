@@ -284,3 +284,45 @@ async def login_json(
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.post("/verify-email")
+async def verify_email(
+    token: str,
+    session: AsyncSession = Depends(get_session)
+):
+    """Verify email with token."""
+    try:
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM]
+        )
+        user_id = payload.get("sub")
+        purpose = payload.get("purpose")
+
+        if purpose != "email_verification":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid verification token"
+            )
+
+        result = await session.execute(select(User).where(User.id == int(user_id)))
+        user = result.scalar_one_or_none()
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        user.email_verified = True
+        user.updated_at = datetime.utcnow()
+        await session.commit()
+
+        return {"message": "Email verified successfully"}
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token"
+        )
