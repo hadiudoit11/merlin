@@ -1,0 +1,35 @@
+# PostgreSQL Database for Local Development
+# ==========================================
+#
+# Start:   docker compose -f docker-compose.db.yml up -d
+# Stop:    docker compose -f docker-compose.db.yml down
+# Logs:    docker compose -f docker-compose.db.yml logs -f
+# Reset:   docker compose -f docker-compose.db.yml down -v  (deletes data!)
+#
+# Connect: psql postgresql://merlin:merlin_dev_password@localhost:5432/merlin
+#
+# The credentials below match ../.env.shared and .env.example
+# Change them in all places if you modify them here.
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: merlin-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-merlin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-merlin_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-merlin}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - merlin_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-merlin} -d ${POSTGRES_DB:-merlin}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  merlin_postgres_data:
+    driver: local

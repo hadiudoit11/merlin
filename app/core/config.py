@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # JWT (legacy - kept for backwards compatibility during migration)
     JWT_SECRET_KEY: str = "jwt-secret-key"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
     # Encryption (for storing API keys securely)
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
