@@ -175,12 +175,25 @@ async def get_canvas(
         )
         connections = conn_result.scalars().all()
 
-    # Return canvas with connections
-    return {
-        **canvas.__dict__,
-        "nodes": canvas.nodes,
-        "connections": connections
-    }
+    # Return canvas with connections - use Pydantic model for proper serialization
+    return CanvasWithNodesResponse(
+        id=canvas.id,
+        name=canvas.name,
+        description=canvas.description,
+        viewport_x=canvas.viewport_x,
+        viewport_y=canvas.viewport_y,
+        zoom_level=canvas.zoom_level,
+        grid_enabled=canvas.grid_enabled,
+        snap_to_grid=canvas.snap_to_grid,
+        grid_size=canvas.grid_size,
+        settings=canvas.settings,
+        owner_id=canvas.owner_id,
+        organization_id=canvas.organization_id,
+        created_at=canvas.created_at,
+        updated_at=canvas.updated_at,
+        nodes=canvas.nodes,
+        connections=connections
+    )
 
 
 @router.put("/{canvas_id}", response_model=CanvasResponse)

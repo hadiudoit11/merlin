@@ -31,7 +31,8 @@ except ImportError:
 
 
 # Configuration
-API_URL = os.getenv("TYPEQUEST_API_URL", "http://localhost:8000")
+# Default to production URL - override with env var for local development
+API_URL = os.getenv("TYPEQUEST_API_URL", "https://merlin-j5sk.onrender.com")
 API_TOKEN = os.getenv("TYPEQUEST_API_TOKEN")
 
 if not API_TOKEN:
