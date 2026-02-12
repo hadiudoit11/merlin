@@ -53,13 +53,15 @@ async def verify_canvas_access(canvas_id: int, user_id: int, session: AsyncSessi
 @router.get("/", response_model=List[NodeResponse])
 async def list_nodes(
     canvas_id: int,
+    node_type: str = None,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ):
     await verify_canvas_access(canvas_id, current_user.id, session)
-    result = await session.execute(
-        select(Node).where(Node.canvas_id == canvas_id)
-    )
+    query = select(Node).where(Node.canvas_id == canvas_id)
+    if node_type:
+        query = query.where(Node.node_type == node_type)
+    result = await session.execute(query)
     return result.scalars().all()
 
 

@@ -79,6 +79,8 @@ async def api_request(
                 return {"error": "Permission denied for this operation."}
             elif response.status_code >= 400:
                 return {"error": f"API error {response.status_code}: {response.text}"}
+            elif response.status_code == 204:
+                return {"success": True, "message": "Operation completed successfully"}
 
             return response.json()
 
@@ -87,7 +89,7 @@ async def api_request(
         except httpx.RequestError as e:
             return {"error": f"API request failed: {str(e)}"}
         except json.JSONDecodeError:
-            return {"error": "Invalid JSON response from API"}
+            return {"error": f"Invalid JSON response from API: {response.text[:500]}"}
 
 
 # ============ Tool Definitions ============
@@ -273,6 +275,43 @@ async def list_tools() -> list[Tool]:
             },
         ),
 
+        # Document Tools
+        Tool(
+            name="list_documents",
+            description="List all document nodes on a canvas. Documents are 'doc' type nodes containing PRDs, specs, meeting notes, etc.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "canvas_id": {"type": "integer", "description": "Canvas ID to list documents from"},
+                },
+                "required": ["canvas_id"],
+            },
+        ),
+        Tool(
+            name="get_document",
+            description="Get a specific document (doc node) with full content",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "node_id": {"type": "integer", "description": "The document node ID"},
+                },
+                "required": ["node_id"],
+            },
+        ),
+        Tool(
+            name="update_document_content",
+            description="Update a document's content. Supports rich text/markdown content.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "node_id": {"type": "integer", "description": "The document node ID"},
+                    "content": {"type": "string", "description": "New document content (markdown/rich text)"},
+                    "name": {"type": "string", "description": "Optional new document title"},
+                },
+                "required": ["node_id", "content"],
+            },
+        ),
+
         # User Info
         Tool(
             name="whoami",
@@ -291,7 +330,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     handlers = {
         # Canvas
         "list_canvases": lambda args: api_request("GET", "/canvases/", params={"limit": args.get("limit", 20)}),
-        "get_canvas": lambda args: api_request("GET", f"/canvases/{args['canvas_id']}/"),
+        "get_canvas": lambda args: api_request("GET", f"/canvases/{args['canvas_id']}"),
         "create_canvas": lambda args: api_request("POST", "/canvases/", json_body={
             "name": args["name"],
             "description": args.get("description", ""),
@@ -306,11 +345,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             "position_x": args.get("position_x", 0),
             "position_y": args.get("position_y", 0),
         }),
-        "update_node": lambda args: api_request("PUT", f"/nodes/{args['node_id']}/", json_body={
+        "update_node": lambda args: api_request("PUT", f"/nodes/{args['node_id']}", json_body={
             k: v for k, v in args.items() if k != "node_id" and v is not None
         }),
-        "delete_node": lambda args: api_request("DELETE", f"/nodes/{args['node_id']}/"),
-        "connect_nodes": lambda args: api_request("POST", f"/nodes/{args['source_node_id']}/connect/", json_body={
+        "delete_node": lambda args: api_request("DELETE", f"/nodes/{args['node_id']}"),
+        "connect_nodes": lambda args: api_request("POST", "/nodes/connections", json_body={
+            "source_node_id": args["source_node_id"],
             "target_node_id": args["target_node_id"],
         }),
 
@@ -322,11 +362,19 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             k: v for k, v in args.items() if v is not None
         }),
         "create_task": lambda args: api_request("POST", "/tasks/", json_body=args),
-        "update_task": lambda args: api_request("PUT", f"/tasks/{args['task_id']}/", json_body={
+        "update_task": lambda args: api_request("PUT", f"/tasks/{args['task_id']}", json_body={
             k: v for k, v in args.items() if k != "task_id" and v is not None
         }),
         "get_task_stats": lambda args: api_request("GET", "/tasks/stats", params={
             k: v for k, v in args.items() if v is not None
+        }),
+
+        # Documents
+        "list_documents": handle_list_documents,
+        "get_document": lambda args: api_request("GET", f"/nodes/{args['node_id']}"),
+        "update_document_content": lambda args: api_request("PUT", f"/nodes/{args['node_id']}", json_body={
+            "content": args["content"],
+            **({"name": args["name"]} if args.get("name") else {}),
         }),
 
         # User
@@ -347,6 +395,28 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
     except Exception as e:
         return [TextContent(type="text", text=json.dumps({"error": str(e)}, indent=2))]
+
+
+async def handle_list_documents(args: dict) -> dict:
+    """List all document nodes for a canvas."""
+    canvas_id = args["canvas_id"]
+
+    # Fetch doc type nodes for the canvas (uses node_type filter)
+    result = await api_request("GET", "/nodes/", params={
+        "canvas_id": canvas_id,
+        "node_type": "doc",
+    })
+
+    if isinstance(result, list):
+        return {
+            "documents": result,
+            "count": len(result),
+            "canvas_id": canvas_id,
+        }
+    elif isinstance(result, dict) and "error" in result:
+        return result
+    else:
+        return {"documents": [], "count": 0, "canvas_id": canvas_id}
 
 
 async def handle_create_okr_structure(args: dict) -> dict:
