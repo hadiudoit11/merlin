@@ -168,13 +168,19 @@ async def get_current_user(
     """
     # Try Auth0 first if configured
     if settings.USE_AUTH0 and credentials:
-        return await get_current_user_from_auth0(credentials, session)
+        try:
+            return await get_current_user_from_auth0(credentials, session)
+        except HTTPException:
+            # Auth0 validation failed - fall through to legacy JWT validation
+            pass
 
-    # Fall back to legacy JWT/MCP token if Auth0 not configured
-    if token:
+    # Fall back to legacy JWT/MCP token
+    # Use either the oauth2_scheme token or extract from HTTPBearer credentials
+    token_to_validate = token or (credentials.credentials if credentials else None)
+    if token_to_validate:
         # Import token validation for backwards compatibility
         from app.api.v1.endpoints.auth import validate_token_and_get_user
-        return await validate_token_and_get_user(token, session)
+        return await validate_token_and_get_user(token_to_validate, session)
 
     # In DEBUG mode, allow unauthenticated access with dev user
     if settings.DEBUG and not credentials and not token:

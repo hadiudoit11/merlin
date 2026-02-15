@@ -42,10 +42,13 @@ class SyncStatus(str, enum.Enum):
 
 class Integration(Base):
     """
-    Organization-level integration connection.
+    Integration connection supporting both organization and user-level connections.
 
-    Stores OAuth tokens and configuration for connecting to external services.
-    Each organization can have one connection per provider.
+    Hybrid approach:
+    - Organization-level: user_id is NULL, shared by all org members
+    - User-level: user_id is set, personal override for that user
+
+    Fallback chain: User connection → Org connection → Not connected
     """
     __tablename__ = "integrations"
 
@@ -53,6 +56,9 @@ class Integration(Base):
 
     # Organization this integration belongs to
     organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+
+    # User for personal connections (NULL = org-level shared connection)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
 
     # Provider info
     provider = Column(Enum(IntegrationProvider), nullable=False)
@@ -86,8 +92,19 @@ class Integration(Base):
 
     # Relationships
     organization = relationship("Organization", backref="integrations")
+    user = relationship("User", foreign_keys=[user_id], backref="personal_integrations")
     connected_by = relationship("User", foreign_keys=[connected_by_id])
     space_integrations = relationship("SpaceIntegration", back_populates="integration", cascade="all, delete-orphan")
+
+    @property
+    def is_personal(self) -> bool:
+        """Check if this is a user-level (personal) integration."""
+        return self.user_id is not None
+
+    @property
+    def scope_label(self) -> str:
+        """Human-readable scope label."""
+        return "Personal" if self.is_personal else "Organization"
 
     @property
     def is_token_expired(self) -> bool:

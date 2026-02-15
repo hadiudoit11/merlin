@@ -35,8 +35,21 @@ _oauth_states: dict = {}
 
 # ============ Schemas ============
 
-class JiraConnectionStatus(BaseModel):
+class JiraConnectionInfo(BaseModel):
     connected: bool
+    site_name: Optional[str] = None
+    cloud_id: Optional[str] = None
+    connected_at: Optional[str] = None
+    connected_by_id: Optional[int] = None
+
+
+class JiraConnectionStatus(BaseModel):
+    """Hybrid connection status showing both org and personal connections."""
+    connected: bool
+    active_scope: Optional[str] = None  # "organization" or "personal"
+    organization: Optional[JiraConnectionInfo] = None
+    personal: Optional[JiraConnectionInfo] = None
+    # Legacy fields for backwards compatibility
     site_name: Optional[str] = None
     cloud_id: Optional[str] = None
     connected_at: Optional[datetime] = None
@@ -157,14 +170,26 @@ async def process_jira_webhook_event(event_id: int, org_id: int, user_id: int):
 
 @router.get("/connect")
 async def connect_jira(
+    scope: str = Query("organization", description="Connection scope: 'organization' or 'personal'"),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Start Jira OAuth flow."""
+    """
+    Start Jira OAuth flow.
+
+    Args:
+        scope: "organization" for shared org connection, "personal" for user-specific
+    """
     if not settings.JIRA_CONFIGURED:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Jira integration not configured"
+        )
+
+    if scope not in ("organization", "personal"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="scope must be 'organization' or 'personal'"
         )
 
     org_id = await get_user_org_id(session, current_user.id)
@@ -174,6 +199,7 @@ async def connect_jira(
     _oauth_states[state] = {
         "user_id": current_user.id,
         "org_id": org_id,
+        "scope": scope,
         "created_at": datetime.utcnow(),
     }
 
@@ -212,7 +238,8 @@ async def jira_oauth_callback(
         # Use the first site (or could prompt user to choose)
         site = resources[0]
 
-        # Create/update integration
+        # Create/update integration with the specified scope
+        scope = state_data.get("scope", "organization")
         await jira_integration_service.create_integration(
             session,
             organization_id=state_data["org_id"],
@@ -220,18 +247,19 @@ async def jira_oauth_callback(
             tokens=tokens,
             cloud_id=site["id"],
             site_name=site["name"],
+            scope=scope,
         )
 
         # Redirect to frontend success page
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/settings/integrations?jira=connected"
+            url=f"{frontend_url}/integrations?jira=connected&scope={scope}"
         )
 
     except JiraError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"OAuth failed: {str(e)}"
+        frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
+        return RedirectResponse(
+            url=f"{frontend_url}/integrations?jira=error&message={str(e)}"
         )
 
 
@@ -240,41 +268,82 @@ async def get_jira_status(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Check if Jira is connected for the user's organization."""
+    """
+    Check Jira connection status.
+
+    Returns hybrid status showing both organization and personal connections,
+    plus which one is currently active (personal takes priority).
+    """
     org_id = await SettingsService.get_user_organization_id(session, current_user.id)
 
     if not org_id:
         return JiraConnectionStatus(connected=False)
 
-    integration = await jira_integration_service.get_integration(session, org_id)
+    # Get detailed hybrid status
+    status = await jira_integration_service.get_connection_status(
+        session, org_id, current_user.id
+    )
 
-    if not integration or not integration.is_connected:
-        return JiraConnectionStatus(connected=False)
+    # Build response with both connections
+    org_info = None
+    personal_info = None
+
+    if status.get("organization"):
+        org_info = JiraConnectionInfo(**status["organization"])
+
+    if status.get("personal"):
+        personal_info = JiraConnectionInfo(**status["personal"])
+
+    # Get active integration for legacy fields
+    active_integration = await jira_integration_service.get_integration(
+        session, org_id, user_id=current_user.id
+    )
 
     return JiraConnectionStatus(
-        connected=True,
-        site_name=integration.provider_data.get("site_name"),
-        cloud_id=integration.provider_data.get("cloud_id"),
-        connected_at=integration.created_at,
+        connected=status["connected"],
+        active_scope=status["active_scope"],
+        organization=org_info,
+        personal=personal_info,
+        # Legacy fields for backwards compatibility
+        site_name=active_integration.provider_data.get("site_name") if active_integration else None,
+        cloud_id=active_integration.provider_data.get("cloud_id") if active_integration else None,
+        connected_at=active_integration.created_at if active_integration else None,
     )
 
 
 @router.delete("/disconnect")
 async def disconnect_jira(
+    scope: str = Query("organization", description="Which connection to disconnect: 'organization' or 'personal'"),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Disconnect Jira integration."""
+    """
+    Disconnect Jira integration.
+
+    Args:
+        scope: "organization" to disconnect org connection, "personal" for user-specific
+    """
+    if scope not in ("organization", "personal"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="scope must be 'organization' or 'personal'"
+        )
+
     org_id = await get_user_org_id(session, current_user.id)
 
-    disconnected = await jira_integration_service.disconnect(session, org_id)
+    disconnected = await jira_integration_service.disconnect(
+        session,
+        org_id,
+        user_id=current_user.id,
+        scope=scope,
+    )
 
     if disconnected:
-        return {"status": "disconnected"}
+        return {"status": "disconnected", "scope": scope}
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No Jira integration found"
+            detail=f"No {scope} Jira integration found"
         )
 
 
@@ -290,6 +359,8 @@ async def import_from_jira(
     """
     Import issues from Jira using a JQL query.
 
+    Uses the active Jira connection (personal takes priority over org).
+
     Example JQL queries:
     - "project = PROJ AND status != Done"
     - "assignee = currentUser() AND updated >= -7d"
@@ -297,7 +368,10 @@ async def import_from_jira(
     """
     org_id = await get_user_org_id(session, current_user.id)
 
-    integration = await jira_integration_service.get_integration(session, org_id)
+    # Use fallback chain: personal → org
+    integration = await jira_integration_service.get_integration(
+        session, org_id, user_id=current_user.id
+    )
     if not integration:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -354,10 +428,17 @@ async def push_task_to_jira(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Push an internal task to Jira as a new issue."""
+    """
+    Push an internal task to Jira as a new issue.
+
+    Uses the active Jira connection (personal takes priority over org).
+    """
     org_id = await get_user_org_id(session, current_user.id)
 
-    integration = await jira_integration_service.get_integration(session, org_id)
+    # Use fallback chain: personal → org
+    integration = await jira_integration_service.get_integration(
+        session, org_id, user_id=current_user.id
+    )
     if not integration:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
