@@ -287,7 +287,12 @@ class JiraService:
 
 
 class JiraIntegrationService:
-    """Manages Jira integrations for organizations with hybrid (org + personal) support."""
+    """
+    Manages Jira integrations with support for:
+    - Individual users (no org membership)
+    - Organization-level shared connections
+    - Personal overrides within org context
+    """
 
     def __init__(self):
         self.jira_service = JiraService()
@@ -295,21 +300,49 @@ class JiraIntegrationService:
     async def get_integration(
         self,
         session: AsyncSession,
-        organization_id: int,
+        organization_id: Optional[int] = None,
         user_id: Optional[int] = None,
-        scope: Optional[str] = None,  # "personal", "organization", or None for fallback
+        scope: Optional[str] = None,  # "individual", "personal", "organization", or None for fallback
     ) -> Optional[Integration]:
         """
-        Get Jira integration with fallback chain: Personal → Organization.
+        Get Jira integration with fallback chain.
+
+        For individual users (no org): Returns their individual integration
+        For org members: Personal override → Org-level → Not connected
 
         Args:
             session: Database session
-            organization_id: Organization ID
-            user_id: User ID for personal connection lookup
-            scope: Force specific scope ("personal" or "organization"), or None for fallback
+            organization_id: Organization ID (None for individual users)
+            user_id: User ID (required for individual/personal lookups)
+            scope: Force specific scope, or None for automatic fallback
         """
-        # If specific scope requested
+        # Individual user (no org membership)
+        if organization_id is None:
+            if not user_id:
+                return None
+            result = await session.execute(
+                select(Integration).where(
+                    Integration.organization_id == None,
+                    Integration.user_id == user_id,
+                    Integration.provider == IntegrationProvider.JIRA,
+                )
+            )
+            return result.scalar_one_or_none()
+
+        # Specific scope requested
+        if scope == "individual" and user_id:
+            # Individual integration (no org context)
+            result = await session.execute(
+                select(Integration).where(
+                    Integration.organization_id == None,
+                    Integration.user_id == user_id,
+                    Integration.provider == IntegrationProvider.JIRA,
+                )
+            )
+            return result.scalar_one_or_none()
+
         if scope == "personal" and user_id:
+            # Personal override within org
             result = await session.execute(
                 select(Integration).where(
                     Integration.organization_id == organization_id,
@@ -320,10 +353,11 @@ class JiraIntegrationService:
             return result.scalar_one_or_none()
 
         if scope == "organization":
+            # Org-level shared
             result = await session.execute(
                 select(Integration).where(
                     Integration.organization_id == organization_id,
-                    Integration.user_id == None,  # Org-level has no user_id
+                    Integration.user_id == None,
                     Integration.provider == IntegrationProvider.JIRA,
                 )
             )
@@ -331,7 +365,7 @@ class JiraIntegrationService:
 
         # Fallback chain: Personal → Organization
         if user_id:
-            # First try personal
+            # First try personal override within org
             result = await session.execute(
                 select(Integration).where(
                     Integration.organization_id == organization_id,
@@ -356,20 +390,15 @@ class JiraIntegrationService:
     async def get_connection_status(
         self,
         session: AsyncSession,
-        organization_id: int,
         user_id: int,
+        organization_id: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """Get detailed connection status for both org and personal levels."""
-        # Get org-level connection
-        org_integration = await self.get_integration(
-            session, organization_id, scope="organization"
-        )
+        """
+        Get detailed connection status.
 
-        # Get personal connection
-        personal_integration = await self.get_integration(
-            session, organization_id, user_id=user_id, scope="personal"
-        )
-
+        For individual users: Returns individual connection status
+        For org members: Returns both org and personal connection status
+        """
         def format_integration(integration: Optional[Integration]) -> Optional[Dict]:
             if not integration or not integration.is_connected:
                 return None
@@ -381,6 +410,30 @@ class JiraIntegrationService:
                 "connected_by_id": integration.connected_by_id,
             }
 
+        # Individual user (no org)
+        if organization_id is None:
+            individual_integration = await self.get_integration(
+                session, organization_id=None, user_id=user_id
+            )
+            is_connected = individual_integration and individual_integration.is_connected
+
+            return {
+                "individual": format_integration(individual_integration),
+                "organization": None,
+                "personal": None,
+                "active_scope": "individual" if is_connected else None,
+                "connected": is_connected,
+            }
+
+        # Org member - check both levels
+        org_integration = await self.get_integration(
+            session, organization_id, scope="organization"
+        )
+
+        personal_integration = await self.get_integration(
+            session, organization_id, user_id=user_id, scope="personal"
+        )
+
         # Determine which is active (personal overrides org)
         active_scope = None
         if personal_integration and personal_integration.is_connected:
@@ -389,6 +442,7 @@ class JiraIntegrationService:
             active_scope = "organization"
 
         return {
+            "individual": None,
             "organization": format_integration(org_integration),
             "personal": format_integration(personal_integration),
             "active_scope": active_scope,
@@ -398,30 +452,39 @@ class JiraIntegrationService:
     async def create_integration(
         self,
         session: AsyncSession,
-        organization_id: int,
         user_id: int,
         tokens: Dict[str, Any],
         cloud_id: str,
         site_name: str,
-        scope: str = "organization",  # "organization" or "personal"
+        organization_id: Optional[int] = None,
+        scope: str = "individual",  # "individual", "organization", or "personal"
     ) -> Integration:
         """
         Create or update Jira integration.
 
         Args:
-            scope: "organization" for shared org-level, "personal" for user-specific
+            user_id: The user connecting the integration
+            organization_id: Org ID (None for individual users)
+            scope: "individual" (no org), "organization" (shared), or "personal" (override within org)
         """
         from app.models.integration import SyncStatus
 
-        # Determine if this is a personal or org integration
-        is_personal = scope == "personal"
-        target_user_id = user_id if is_personal else None
+        # Determine target IDs based on scope
+        if scope == "individual":
+            target_org_id = None
+            target_user_id = user_id
+        elif scope == "personal":
+            target_org_id = organization_id
+            target_user_id = user_id
+        else:  # organization
+            target_org_id = organization_id
+            target_user_id = None
 
         # Check for existing integration at same scope
         existing = await self.get_integration(
             session,
-            organization_id,
-            user_id=user_id if is_personal else None,
+            organization_id=target_org_id,
+            user_id=target_user_id if scope in ("individual", "personal") else None,
             scope=scope,
         )
 
@@ -443,8 +506,8 @@ class JiraIntegrationService:
 
         # Create new
         integration = Integration(
-            organization_id=organization_id,
-            user_id=target_user_id,  # NULL for org-level, set for personal
+            organization_id=target_org_id,
+            user_id=target_user_id,
             connected_by_id=user_id,
             provider=IntegrationProvider.JIRA,
             access_token=tokens["access_token"],
@@ -465,20 +528,22 @@ class JiraIntegrationService:
     async def disconnect(
         self,
         session: AsyncSession,
-        organization_id: int,
-        user_id: Optional[int] = None,
-        scope: str = "organization",
+        user_id: int,
+        organization_id: Optional[int] = None,
+        scope: str = "individual",
     ) -> bool:
         """
         Disconnect Jira integration.
 
         Args:
-            scope: "organization" or "personal"
+            user_id: User performing the disconnect
+            organization_id: Org ID (None for individual users)
+            scope: "individual", "organization", or "personal"
         """
         integration = await self.get_integration(
             session,
-            organization_id,
-            user_id=user_id if scope == "personal" else None,
+            organization_id=organization_id,
+            user_id=user_id if scope in ("individual", "personal") else None,
             scope=scope,
         )
 
@@ -509,19 +574,6 @@ class JiraIntegrationService:
 
         await session.commit()
         return integration.access_token
-
-    async def disconnect(self, session: AsyncSession, organization_id: int) -> bool:
-        """Disconnect Jira integration."""
-        from app.models.integration import SyncStatus
-
-        integration = await self.get_integration(session, organization_id)
-        if integration:
-            integration.status = SyncStatus.DISCONNECTED
-            integration.access_token = None
-            integration.refresh_token = None
-            await session.commit()
-            return True
-        return False
 
 
 # Singleton instances

@@ -44,6 +44,9 @@ from app.models.task import Task, TaskStatus, TaskPriority, TaskSource, InputEve
 from app.models.integration import Integration, IntegrationProvider, MeetingImport
 from app.models.node import Node
 from app.models.mcp import MCPAuditLog, MCPActionStatus
+from app.models.project import Project
+from app.models.artifact import Artifact
+from app.models.change_proposal import ChangeProposal
 from app.services import template_service
 
 
@@ -376,6 +379,143 @@ async def list_tools() -> list[Tool]:
                 "required": ["event_id"],
             },
         ),
+
+        # Jira Strategic Context Tools
+        Tool(
+            name="search_jira_context",
+            description="Search for Jira issues related to a topic/problem for strategic PM context. Uses semantic similarity to find relevant tickets.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Text to search for (e.g., 'authentication performance issues')",
+                    },
+                    "canvas_id": {
+                        "type": "integer",
+                        "description": "Canvas ID to search within",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Number of results to return (default 10)",
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="get_jira_connections",
+            description="Get all Jira issues connected to a canvas or specific node. Useful for understanding related work.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "canvas_id": {
+                        "type": "integer",
+                        "description": "Canvas ID",
+                    },
+                    "node_id": {
+                        "type": "integer",
+                        "description": "Optional - get issues linked to specific node",
+                    },
+                },
+                "required": ["canvas_id"],
+            },
+        ),
+        Tool(
+            name="index_jira_for_canvas",
+            description="Index all Jira issues on a canvas for semantic search. Call this after importing Jira issues.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "canvas_id": {
+                        "type": "integer",
+                        "description": "Canvas ID to index",
+                    },
+                },
+                "required": ["canvas_id"],
+            },
+        ),
+
+        # Project & Artifact Tools
+        Tool(
+            name="list_projects",
+            description="List product-development projects on a canvas. Projects track workflow stages from research to retrospective.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "canvas_id": {"type": "integer", "description": "Canvas ID"},
+                    "stage": {
+                        "type": "string",
+                        "enum": ["research", "prd_review", "ux_review", "tech_spec", "project_kickoff", "development", "qa", "launch", "retrospective"],
+                        "description": "Filter by workflow stage",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="get_project",
+            description="Get full details of a project including its artifacts and change proposals.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer", "description": "The project ID"},
+                },
+                "required": ["project_id"],
+            },
+        ),
+        Tool(
+            name="create_project",
+            description="Create a new product-development project linked to a canvas.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "canvas_id": {"type": "integer", "description": "Canvas to attach the project to"},
+                    "name": {"type": "string", "description": "Project name"},
+                    "description": {"type": "string", "description": "What this project is building"},
+                    "stage": {
+                        "type": "string",
+                        "enum": ["research", "prd_review", "ux_review", "tech_spec", "project_kickoff", "development", "qa", "launch", "retrospective"],
+                        "description": "Starting workflow stage (default: research)",
+                    },
+                },
+                "required": ["canvas_id", "name"],
+            },
+        ),
+        Tool(
+            name="create_artifact",
+            description="Create an artifact (PRD, tech spec, UX notes, etc.) linked to a project. Also creates a doc node on the canvas.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer", "description": "Project ID"},
+                    "canvas_id": {"type": "integer", "description": "Canvas ID for the doc node"},
+                    "artifact_type": {
+                        "type": "string",
+                        "enum": ["prd", "tech_spec", "ux_design", "timeline", "test_plan", "meeting_notes", "research_notes", "other"],
+                        "description": "Type of artifact",
+                    },
+                    "name": {"type": "string", "description": "Artifact name"},
+                    "content": {"type": "string", "description": "Initial markdown content"},
+                },
+                "required": ["project_id", "canvas_id", "artifact_type", "name"],
+            },
+        ),
+        Tool(
+            name="list_change_proposals",
+            description="List change proposals (AI-generated change requests) for a canvas or project. Shows pending proposals that need stakeholder review.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "canvas_id": {"type": "integer", "description": "Filter by canvas"},
+                    "project_id": {"type": "integer", "description": "Filter by project"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "approved", "rejected", "expired"],
+                        "description": "Filter by status (default: pending)",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -400,6 +540,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         "get_jira_status": handle_get_jira_status,
         "import_jira_issues": handle_import_jira_issues,
         "push_task_to_jira": handle_push_task_to_jira,
+        # Jira Strategic Context
+        "search_jira_context": handle_search_jira_context,
+        "get_jira_connections": handle_get_jira_connections,
+        "index_jira_for_canvas": handle_index_jira_for_canvas,
         # Zoom
         "get_zoom_status": handle_get_zoom_status,
         "list_zoom_recordings": handle_list_zoom_recordings,
@@ -407,6 +551,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         # Input Events
         "list_input_events": handle_list_input_events,
         "get_input_event": handle_get_input_event,
+        # Projects & Artifacts
+        "list_projects": handle_list_projects,
+        "get_project": handle_get_project,
+        "create_project": handle_create_project,
+        "create_artifact": handle_create_artifact,
+        "list_change_proposals": handle_list_change_proposals,
     }
 
     handler = handlers.get(name)
@@ -994,6 +1144,335 @@ async def handle_get_input_event(args: dict) -> list[TextContent]:
         }
 
         return [TextContent(type="text", text=json.dumps(output, indent=2))]
+
+
+# ============ Jira Strategic Context Handlers ============
+
+async def handle_search_jira_context(args: dict) -> list[TextContent]:
+    """Search for Jira issues related to a query for strategic PM context."""
+    from app.services.jira_context_service import JiraContextService
+
+    async with async_session_maker() as session:
+        query = args["query"]
+        canvas_id = args.get("canvas_id")
+        top_k = args.get("top_k", 10)
+
+        # Note: In MCP context, we might not have user_id/org_id from session
+        # For now, search without user context (or you could require them as args)
+        issues = await JiraContextService.search_relevant_jira_issues(
+            session,
+            query_text=query,
+            canvas_id=canvas_id,
+            user_id=int(MCP_USER_ID) if MCP_USER_ID else None,
+            organization_id=None,  # Could add as optional arg
+            top_k=top_k,
+        )
+
+        # Format for Claude to read
+        output = {
+            "query": query,
+            "canvas_id": canvas_id,
+            "results_count": len(issues),
+            "issues": [
+                {
+                    "issue_key": issue["issue_key"],
+                    "title": issue["title"],
+                    "description": issue.get("description", "")[:200],  # Truncate
+                    "status": issue["status"],
+                    "priority": issue["priority"],
+                    "confidence_score": round(issue["score"] * 100, 1),
+                    "source_url": issue.get("source_url"),
+                    "task_id": issue["task_id"],
+                    "assignee": issue.get("assignee_name"),
+                }
+                for issue in issues
+            ],
+        }
+
+        # Also include formatted context for direct use in prompts
+        formatted_context = JiraContextService.format_jira_context_for_ai(issues)
+
+        return [
+            TextContent(
+                type="text",
+                text=f"# Jira Strategic Context Search Results\n\n{formatted_context}\n\n## Structured Data\n\n```json\n{json.dumps(output, indent=2)}\n```"
+            )
+        ]
+
+
+async def handle_get_jira_connections(args: dict) -> list[TextContent]:
+    """Get all Jira issues connected to a canvas or specific node."""
+    async with async_session_maker() as session:
+        canvas_id = args["canvas_id"]
+        node_id = args.get("node_id")
+
+        if node_id:
+            # Get issues linked to specific node
+            query = select(Task).options(selectinload(Task.linked_nodes)).where(
+                and_(
+                    Task.source == TaskSource.JIRA,
+                    Task.linked_nodes.any(Node.id == node_id),
+                )
+            )
+        else:
+            # Get all Jira issues on canvas
+            query = select(Task).where(
+                and_(
+                    Task.canvas_id == canvas_id,
+                    Task.source == TaskSource.JIRA,
+                )
+            )
+
+        result = await session.execute(query)
+        tasks = result.scalars().all()
+
+        output = {
+            "canvas_id": canvas_id,
+            "node_id": node_id,
+            "connected_issues_count": len(tasks),
+            "issues": [
+                {
+                    "task_id": t.id,
+                    "issue_key": t.source_id,
+                    "title": t.title,
+                    "description": t.description,
+                    "status": t.status,
+                    "priority": t.priority,
+                    "assignee": t.assignee_name,
+                    "due_date": t.due_date.isoformat() if t.due_date else None,
+                    "source_url": t.source_url,
+                    "linked_nodes_count": len(t.linked_nodes) if hasattr(t, 'linked_nodes') else 0,
+                }
+                for t in tasks
+            ],
+        }
+
+        return [TextContent(type="text", text=json.dumps(output, indent=2))]
+
+
+async def handle_index_jira_for_canvas(args: dict) -> list[TextContent]:
+    """Index all Jira issues on a canvas for semantic search."""
+    from app.services.jira_context_service import JiraContextService
+
+    async with async_session_maker() as session:
+        canvas_id = args["canvas_id"]
+
+        # Index issues (requires user_id for settings)
+        if not MCP_USER_ID:
+            return [
+                TextContent(
+                    type="text",
+                    text="Error: MCP_USER_ID environment variable required for indexing"
+                )
+            ]
+
+        result = await JiraContextService.index_jira_issues(
+            session,
+            canvas_id=canvas_id,
+            user_id=int(MCP_USER_ID),
+            organization_id=None,  # Could add as arg
+        )
+
+        output = {
+            "canvas_id": canvas_id,
+            "indexed_count": result["indexed"],
+            "status": result["status"],
+            "message": f"Successfully indexed {result['indexed']} Jira issues for AI-powered search",
+        }
+
+        return [TextContent(type="text", text=json.dumps(output, indent=2))]
+
+
+# ============ Project & Artifact Handlers ============
+
+async def handle_list_projects(arguments: dict) -> list[TextContent]:
+    """List projects on a canvas."""
+    canvas_id = arguments.get("canvas_id")
+    stage_filter = arguments.get("stage")
+
+    async with async_session_maker() as session:
+        query = select(Project)
+        if canvas_id:
+            query = query.where(Project.canvas_id == canvas_id)
+        if stage_filter:
+            query = query.where(Project.current_stage == stage_filter)
+        query = query.order_by(Project.updated_at.desc())
+        result = await session.execute(query)
+        projects = result.scalars().all()
+
+    output = [
+        {
+            "id": p.id,
+            "name": p.name,
+            "description": p.description,
+            "canvas_id": p.canvas_id,
+            "stage": p.current_stage,
+            "status": p.status,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in projects
+    ]
+    return [TextContent(type="text", text=json.dumps(output, indent=2))]
+
+
+async def handle_get_project(arguments: dict) -> list[TextContent]:
+    """Get project with artifacts and change proposals."""
+    project_id = arguments["project_id"]
+
+    async with async_session_maker() as session:
+        project = await session.get(Project, project_id)
+        if not project:
+            return [TextContent(type="text", text=json.dumps({"error": "Project not found"}))]
+
+        artifacts_result = await session.execute(
+            select(Artifact).where(Artifact.project_id == project_id)
+        )
+        artifacts = artifacts_result.scalars().all()
+
+        proposals_result = await session.execute(
+            select(ChangeProposal).where(
+                ChangeProposal.project_id == project_id,
+                ChangeProposal.status == "pending",
+            )
+        )
+        pending_proposals = proposals_result.scalars().all()
+
+    output = {
+        "id": project.id,
+        "name": project.name,
+        "description": project.description,
+        "canvas_id": project.canvas_id,
+        "stage": project.current_stage,
+        "status": project.status,
+        "artifacts": [
+            {
+                "id": a.id,
+                "name": a.name,
+                "type": a.artifact_type,
+                "status": a.status,
+                "version": a.version,
+            }
+            for a in artifacts
+        ],
+        "pending_proposals_count": len(pending_proposals),
+    }
+    return [TextContent(type="text", text=json.dumps(output, indent=2))]
+
+
+async def handle_create_project(arguments: dict) -> list[TextContent]:
+    """Create a product-development project."""
+    if not MCP_USER_ID:
+        return [TextContent(type="text", text=json.dumps({"error": "MCP_USER_ID not set"}))]
+
+    async with async_session_maker() as session:
+        project = Project(
+            canvas_id=arguments["canvas_id"],
+            name=arguments["name"],
+            description=arguments.get("description", ""),
+            current_stage=arguments.get("stage", "research"),
+            created_by_id=int(MCP_USER_ID),
+        )
+        session.add(project)
+        await session.commit()
+        await session.refresh(project)
+
+    output = {
+        "project_id": project.id,
+        "name": project.name,
+        "stage": project.current_stage,
+        "canvas_id": project.canvas_id,
+    }
+    return [TextContent(type="text", text=json.dumps(output, indent=2))]
+
+
+async def handle_create_artifact(arguments: dict) -> list[TextContent]:
+    """Create an artifact and a doc node on the canvas."""
+    if not MCP_USER_ID:
+        return [TextContent(type="text", text=json.dumps({"error": "MCP_USER_ID not set"}))]
+
+    project_id = arguments["project_id"]
+    canvas_id = arguments["canvas_id"]
+    artifact_type = arguments["artifact_type"]
+    name = arguments["name"]
+    content = arguments.get("content", "")
+
+    async with async_session_maker() as session:
+        # Count nodes to determine position
+        nodes_result = await session.execute(
+            select(Node).where(Node.canvas_id == canvas_id)
+        )
+        node_count = len(nodes_result.scalars().all())
+
+        node = Node(
+            canvas_id=canvas_id,
+            name=name,
+            node_type="doc",
+            content=content[:500] if content else "",
+            position_x=200 + (node_count % 3) * 380,
+            position_y=200 + (node_count // 3) * 280,
+            width=320,
+            height=200,
+        )
+        session.add(node)
+        await session.flush()
+
+        artifact = Artifact(
+            name=name,
+            artifact_type=artifact_type,
+            project_id=project_id,
+            canvas_id=canvas_id,
+            node_id=node.id,
+            content=content or "",
+            content_format="markdown",
+            created_by_id=int(MCP_USER_ID),
+            current_owner_id=int(MCP_USER_ID),
+        )
+        session.add(artifact)
+        await session.commit()
+        await session.refresh(artifact)
+
+    output = {
+        "artifact_id": artifact.id,
+        "node_id": node.id,
+        "name": name,
+        "type": artifact_type,
+        "canvas_id": canvas_id,
+    }
+    return [TextContent(type="text", text=json.dumps(output, indent=2))]
+
+
+async def handle_list_change_proposals(arguments: dict) -> list[TextContent]:
+    """List change proposals for a canvas or project."""
+    canvas_id = arguments.get("canvas_id")
+    project_id = arguments.get("project_id")
+    status_filter = arguments.get("status", "pending")
+
+    async with async_session_maker() as session:
+        query = select(ChangeProposal)
+        if project_id:
+            query = query.where(ChangeProposal.project_id == project_id)
+        if status_filter:
+            query = query.where(ChangeProposal.status == status_filter)
+        query = query.order_by(ChangeProposal.created_at.desc()).limit(50)
+        result = await session.execute(query)
+        proposals = result.scalars().all()
+
+    output = [
+        {
+            "id": p.id,
+            "title": p.title,
+            "artifact_id": p.artifact_id,
+            "project_id": p.project_id,
+            "change_type": p.change_type,
+            "severity": p.severity,
+            "status": p.status,
+            "triggered_by": p.triggered_by_type,
+            "triggered_by_id": p.triggered_by_id,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in proposals
+    ]
+    return [TextContent(type="text", text=json.dumps(output, indent=2))]
 
 
 # ============ Main ============

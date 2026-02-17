@@ -35,6 +35,9 @@ from app.schemas.organization import (
     AcceptInvitationRequest,
     AcceptInvitationResponse,
     OrganizationRole,
+    DomainCheckResponse,
+    JoinOrgRequest,
+    JoinOrgResponse,
 )
 
 
@@ -791,13 +794,139 @@ async def check_integration_allowed(
     }
 
 
+# ============ Batch Invitations ============
+
+class BatchInvitation(BaseModel):
+    email: str
+    role: OrganizationRole = OrganizationRole.MEMBER
+
+
+class BatchInvitationRequest(BaseModel):
+    invitations: List[BatchInvitation]
+
+
+class BatchInvitationResult(BaseModel):
+    email: str
+    success: bool
+    error: Optional[str] = None
+    invitation_id: Optional[int] = None
+
+
+class BatchInvitationResponse(BaseModel):
+    sent: int
+    failed: int
+    results: List[BatchInvitationResult]
+
+
+@router.post("/{organization_id}/invitations/batch", response_model=BatchInvitationResponse)
+async def create_batch_invitations(
+    organization_id: int,
+    data: BatchInvitationRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+) -> BatchInvitationResponse:
+    """Create multiple invitations at once. Useful during org creation."""
+    await require_org_permission(session, organization_id, current_user.id, ModelRole.ADMIN)
+
+    # Get organization
+    result = await session.execute(
+        select(Organization).where(Organization.id == organization_id)
+    )
+    org = result.scalar_one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    results = []
+    sent = 0
+    failed = 0
+
+    for inv_data in data.invitations:
+        try:
+            # Check if user is already a member
+            user_result = await session.execute(
+                select(User).where(User.email == inv_data.email)
+            )
+            existing_user = user_result.scalar_one_or_none()
+
+            if existing_user:
+                existing_member = await get_user_role(session, organization_id, existing_user.id)
+                if existing_member:
+                    results.append(BatchInvitationResult(
+                        email=inv_data.email,
+                        success=False,
+                        error="User is already a member"
+                    ))
+                    failed += 1
+                    continue
+
+            # Check for existing pending invitation
+            inv_result = await session.execute(
+                select(OrganizationInvitation)
+                .where(
+                    OrganizationInvitation.organization_id == organization_id,
+                    OrganizationInvitation.email == inv_data.email,
+                    OrganizationInvitation.status == ModelInvitationStatus.PENDING
+                )
+            )
+            if inv_result.scalar_one_or_none():
+                results.append(BatchInvitationResult(
+                    email=inv_data.email,
+                    success=False,
+                    error="Invitation already sent"
+                ))
+                failed += 1
+                continue
+
+            # Create invitation
+            invitation = OrganizationInvitation(
+                organization_id=organization_id,
+                invited_by_id=current_user.id,
+                email=inv_data.email,
+                role=ModelRole(inv_data.role.value.upper()),
+                token=OrganizationInvitation.generate_token(),
+                expires_at=OrganizationInvitation.default_expiry(),
+            )
+            session.add(invitation)
+            await session.flush()
+
+            results.append(BatchInvitationResult(
+                email=inv_data.email,
+                success=True,
+                invitation_id=invitation.id
+            ))
+            sent += 1
+
+        except Exception as e:
+            results.append(BatchInvitationResult(
+                email=inv_data.email,
+                success=False,
+                error=str(e)
+            ))
+            failed += 1
+
+    await session.commit()
+
+    # TODO: Send invitation emails
+
+    return BatchInvitationResponse(
+        sent=sent,
+        failed=failed,
+        results=results
+    )
+
+
 # ============ My Organizations ============
 
-@router.get("/me/memberships", response_model=List[MyMembership])
+class MyMembershipsResponse(BaseModel):
+    memberships: List[MyMembership]
+    pending_invitations_count: int
+
+
+@router.get("/me/memberships", response_model=MyMembershipsResponse)
 async def get_my_memberships(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
-) -> List[MyMembership]:
+) -> MyMembershipsResponse:
     """Get all organizations the current user is a member of with their roles."""
     result = await session.execute(
         select(OrganizationMember)
@@ -809,7 +938,17 @@ async def get_my_memberships(
     )
     memberships = result.scalars().all()
 
-    return [
+    # Count pending invitations for this user
+    pending_result = await session.execute(
+        select(func.count(OrganizationInvitation.id))
+        .where(
+            OrganizationInvitation.email == current_user.email,
+            OrganizationInvitation.status == ModelInvitationStatus.PENDING
+        )
+    )
+    pending_count = pending_result.scalar() or 0
+
+    membership_list = [
         MyMembership(
             organization=OrganizationBrief(
                 id=m.organization.id,
@@ -823,3 +962,208 @@ async def get_my_memberships(
         for m in memberships
         if m.organization and m.organization.is_active
     ]
+
+    return MyMembershipsResponse(
+        memberships=membership_list,
+        pending_invitations_count=pending_count
+    )
+
+
+# ============ Domain-Based Membership ============
+
+def extract_email_domain(email: str) -> str:
+    """Extract domain from email address."""
+    if "@" not in email:
+        return ""
+    return email.split("@")[1].lower()
+
+
+def is_personal_email_domain(domain: str) -> bool:
+    """Check if domain is a common personal email provider."""
+    personal_domains = {
+        "gmail.com", "googlemail.com",
+        "outlook.com", "hotmail.com", "live.com", "msn.com",
+        "yahoo.com", "ymail.com",
+        "icloud.com", "me.com", "mac.com",
+        "aol.com",
+        "protonmail.com", "proton.me",
+        "zoho.com",
+        "mail.com",
+        "gmx.com", "gmx.net",
+        "fastmail.com",
+        "tutanota.com",
+    }
+    return domain in personal_domains
+
+
+@router.get("/domain/check", response_model=DomainCheckResponse)
+async def check_domain_organization(
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+) -> DomainCheckResponse:
+    """
+    Check if the current user's email domain matches any organization.
+
+    This is called after login to determine if:
+    1. User should be prompted to join an organization
+    2. User should be redirected to SSO
+    3. User can continue as an individual
+    """
+    email = current_user.email
+    if not email:
+        return DomainCheckResponse(
+            has_matching_org=False,
+            require_sso=False,
+            auto_join=False,
+            is_member=False,
+        )
+
+    domain = extract_email_domain(email)
+
+    # Personal email domains never match organizations
+    if is_personal_email_domain(domain):
+        return DomainCheckResponse(
+            has_matching_org=False,
+            require_sso=False,
+            auto_join=False,
+            is_member=False,
+        )
+
+    # Check if domain matches any organization
+    result = await session.execute(
+        select(Organization)
+        .where(
+            Organization.domain == domain,
+            Organization.is_active == True
+        )
+    )
+    org = result.scalar_one_or_none()
+
+    if not org:
+        return DomainCheckResponse(
+            has_matching_org=False,
+            require_sso=False,
+            auto_join=False,
+            is_member=False,
+        )
+
+    # Check if user is already a member
+    membership = await get_user_role(session, org.id, current_user.id)
+
+    # Build SSO URL if required
+    sso_url = None
+    if org.require_sso_for_domain and not membership:
+        # Frontend will handle redirect to SSO provider
+        sso_url = f"/auth/sso?org={org.slug}"
+
+    return DomainCheckResponse(
+        has_matching_org=True,
+        organization=OrganizationBrief(
+            id=org.id,
+            name=org.name,
+            slug=org.slug,
+            logo_url=org.logo_url,
+        ),
+        require_sso=org.require_sso_for_domain,
+        auto_join=org.auto_join_domain,
+        is_member=membership is not None,
+        sso_url=sso_url,
+    )
+
+
+@router.post("/domain/join", response_model=JoinOrgResponse)
+async def join_organization_by_domain(
+    data: JoinOrgRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+) -> JoinOrgResponse:
+    """
+    Join an organization based on email domain match.
+
+    Requirements:
+    1. User's email domain must match the organization's domain
+    2. Organization must have auto_join_domain enabled
+    3. User must not already be a member
+    4. Organization must not require SSO
+    """
+    # Get the organization
+    result = await session.execute(
+        select(Organization)
+        .where(
+            Organization.id == data.organization_id,
+            Organization.is_active == True
+        )
+    )
+    org = result.scalar_one_or_none()
+
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found"
+        )
+
+    # Check domain match
+    email = current_user.email
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User email is required"
+        )
+
+    user_domain = extract_email_domain(email)
+
+    if not org.domain or user_domain != org.domain:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your email domain does not match this organization"
+        )
+
+    # Check if SSO is required
+    if org.require_sso_for_domain:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This organization requires SSO login. Please use the SSO option."
+        )
+
+    # Check if auto-join is enabled
+    if not org.auto_join_domain:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This organization does not allow automatic joining. Please request an invitation."
+        )
+
+    # Check if already a member
+    existing = await get_user_role(session, org.id, current_user.id)
+    if existing:
+        return JoinOrgResponse(
+            success=True,
+            message="You are already a member of this organization",
+            organization=OrganizationBrief(
+                id=org.id,
+                name=org.name,
+                slug=org.slug,
+                logo_url=org.logo_url,
+            ),
+            role=existing,
+        )
+
+    # Create membership
+    membership = OrganizationMember(
+        organization_id=org.id,
+        user_id=current_user.id,
+        role=ModelRole.MEMBER,
+    )
+    session.add(membership)
+    await session.commit()
+
+    return JoinOrgResponse(
+        success=True,
+        message=f"Welcome to {org.name}!",
+        organization=OrganizationBrief(
+            id=org.id,
+            name=org.name,
+            slug=org.slug,
+            logo_url=org.logo_url,
+        ),
+        role=OrganizationRole.MEMBER,
+    )

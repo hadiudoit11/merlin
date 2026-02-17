@@ -55,6 +55,11 @@ class Organization(Base):
     is_active = Column(Boolean, default=True)
     allow_member_invites = Column(Boolean, default=False)  # Allow admins to invite
 
+    # Domain-based membership
+    domain = Column(String(255), nullable=True, index=True)  # e.g., "acme.com"
+    require_sso_for_domain = Column(Boolean, default=False)  # Force SSO for domain users
+    auto_join_domain = Column(Boolean, default=True)  # Auto-add users with matching domain
+
     # Integration settings (JSON for flexibility)
     # Structure: {
     #   "allowed_integrations": ["zoom", "jira", "slack"],  # Empty = all allowed

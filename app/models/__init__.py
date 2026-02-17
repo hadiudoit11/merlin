@@ -45,6 +45,26 @@ from app.models.mcp import (
     MCP_SCOPES,
     TOOL_REQUIRED_SCOPES,
 )
+from app.models.project import (
+    Project,
+    StageTransition,
+    WorkflowStage,
+    ProjectStatus,
+)
+from app.models.artifact import (
+    Artifact,
+    ArtifactVersion,
+    ArtifactType,
+    ArtifactStatus,
+)
+from app.models.change_proposal import (
+    ChangeProposal,
+    ImpactAnalysis,
+    ChangeProposalStatus,
+    ChangeSeverity,
+    ChangeType,
+)
+from app.models.agent_session import AgentSession
 
 __all__ = [
     "User",
@@ -85,4 +105,18 @@ __all__ = [
     "MCPActionStatus",
     "MCP_SCOPES",
     "TOOL_REQUIRED_SCOPES",
+    "Project",
+    "StageTransition",
+    "WorkflowStage",
+    "ProjectStatus",
+    "Artifact",
+    "ArtifactVersion",
+    "ArtifactType",
+    "ArtifactStatus",
+    "ChangeProposal",
+    "ImpactAnalysis",
+    "ChangeProposalStatus",
+    "ChangeSeverity",
+    "ChangeType",
+    "AgentSession",
 ]

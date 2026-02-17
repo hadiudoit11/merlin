@@ -42,6 +42,9 @@ class OrganizationUpdate(BaseModel):
     description: Optional[str] = None
     logo_url: Optional[str] = None
     allow_member_invites: Optional[bool] = None
+    domain: Optional[str] = Field(None, max_length=255, description="Email domain for auto-join (e.g., 'acme.com')")
+    require_sso_for_domain: Optional[bool] = Field(None, description="Require SSO for users with matching email domain")
+    auto_join_domain: Optional[bool] = Field(None, description="Auto-add users with matching domain to org")
 
 
 class OrganizationResponse(OrganizationBase):
@@ -51,6 +54,9 @@ class OrganizationResponse(OrganizationBase):
     logo_url: Optional[str] = None
     is_active: bool
     allow_member_invites: bool
+    domain: Optional[str] = None
+    require_sso_for_domain: bool = False
+    auto_join_domain: bool = True
     created_by_id: int
     created_at: datetime
     updated_at: datetime
@@ -155,3 +161,28 @@ class PermissionCheck(BaseModel):
     has_permission: bool
     role: Optional[OrganizationRole] = None
     reason: Optional[str] = None
+
+
+# ============ Domain Check Schemas ============
+
+class DomainCheckResponse(BaseModel):
+    """Response for checking if user's email domain matches an organization."""
+    has_matching_org: bool
+    organization: Optional[OrganizationBrief] = None
+    require_sso: bool = False
+    auto_join: bool = False
+    is_member: bool = False
+    sso_url: Optional[str] = None  # SSO redirect URL if require_sso is True
+
+
+class JoinOrgRequest(BaseModel):
+    """Request to join an organization based on email domain."""
+    organization_id: int
+
+
+class JoinOrgResponse(BaseModel):
+    """Response after joining an organization."""
+    success: bool
+    message: str
+    organization: Optional[OrganizationBrief] = None
+    role: Optional[OrganizationRole] = None

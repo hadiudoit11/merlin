@@ -18,6 +18,7 @@ from app.services.input_processor import (
     Job, JobContext, JobResult, JobStatus, InputProcessor
 )
 from app.models.task import Task, TaskStatus, TaskPriority, TaskSource
+from app.models.project import Project
 from app.services.jira import jira_service, jira_integration_service, JiraError
 
 logger = logging.getLogger(__name__)
@@ -430,6 +431,103 @@ class PushTaskToJiraJob(Job):
             )
 
 
+class WorkflowOrchestratorJob(Job):
+    """
+    Triggers AI impact analysis on all projects linked to an affected canvas.
+
+    When a Jira issue arrives:
+    1. Find the task created/updated by JiraIssueSyncJob
+    2. Get canvas linked to that task
+    3. Find all projects on that canvas
+    4. Call WorkflowOrchestrator to analyze impact on each project
+    """
+    name = "workflow_orchestrator"
+    description = "Analyze Jira issue impact on product artifacts"
+
+    def should_run(self, context: JobContext) -> bool:
+        """Only run for issue_created and issue_updated events."""
+        event_type = context.metadata.get("event_type", "")
+        return event_type in ("jira:issue_created", "jira:issue_updated")
+
+    async def execute(self, context: JobContext) -> JobResult:
+        try:
+            from app.services.workflow_orchestrator import WorkflowOrchestrator
+
+            # Get task created/updated by JiraIssueSyncJob
+            if not context.created_tasks:
+                return JobResult(
+                    status=JobStatus.SKIPPED,
+                    message="No tasks to analyze (no linked canvas)"
+                )
+
+            task = context.created_tasks[0]
+
+            # Need a canvas to find projects
+            if not task.canvas_id:
+                return JobResult(
+                    status=JobStatus.SKIPPED,
+                    message=f"Task {task.source_id} has no canvas - skipping workflow analysis"
+                )
+
+            # Find all active projects on this canvas
+            result = await context.session.execute(
+                select(Project).where(
+                    Project.canvas_id == task.canvas_id,
+                    Project.status.in_(["planning", "active"])
+                )
+            )
+            projects = result.scalars().all()
+
+            if not projects:
+                return JobResult(
+                    status=JobStatus.SKIPPED,
+                    message=f"No active projects on canvas {task.canvas_id}"
+                )
+
+            # Build trigger content from Jira issue
+            issue = context.metadata.get("issue", {})
+            fields = issue.get("fields", {})
+            issue_key = issue.get("key", "")
+            summary = fields.get("summary", "")
+            description = extract_text_from_adf(fields.get("description")) if fields.get("description") else ""
+            issue_type = fields.get("issuetype", {}).get("name", "Issue")
+            priority = fields.get("priority", {}).get("name", "Medium")
+
+            trigger_content = (
+                f"Jira {issue_type}: {issue_key}\n"
+                f"Summary: {summary}\n"
+                f"Priority: {priority}\n"
+                f"Description: {description}"
+            ).strip()
+
+            # Process each project
+            total_proposals = 0
+            for project in projects:
+                result = await WorkflowOrchestrator.process_input_event(
+                    session=context.session,
+                    input_event=context.input_event,
+                    project_id=project.id,
+                    user_id=context.user_id,
+                    organization_id=context.organization_id or project.organization_id,
+                    trigger_content=trigger_content
+                )
+                total_proposals += result["proposals_created"]
+
+            return JobResult(
+                status=JobStatus.COMPLETED,
+                message=f"Created {total_proposals} change proposals across {len(projects)} projects",
+                data={"total_proposals": total_proposals, "projects_analyzed": len(projects)}
+            )
+
+        except Exception as e:
+            logger.exception("WorkflowOrchestratorJob failed")
+            return JobResult(
+                status=JobStatus.FAILED,
+                message="Failed to run workflow orchestration",
+                error=str(e)
+            )
+
+
 # Pre-configured pipelines
 def create_jira_webhook_pipeline() -> InputProcessor:
     """Create pipeline for processing Jira webhook events."""
@@ -437,6 +535,7 @@ def create_jira_webhook_pipeline() -> InputProcessor:
     processor.register_jobs([
         JiraIssueSyncJob(),
         JiraIssueDeleteJob(),
+        WorkflowOrchestratorJob(),  # Triggers AI impact analysis
     ])
     return processor
 

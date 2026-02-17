@@ -42,22 +42,25 @@ class SyncStatus(str, enum.Enum):
 
 class Integration(Base):
     """
-    Integration connection supporting both organization and user-level connections.
+    Integration connection supporting individual, organization, and hybrid user-level connections.
 
-    Hybrid approach:
-    - Organization-level: user_id is NULL, shared by all org members
-    - User-level: user_id is set, personal override for that user
+    Three modes:
+    - Individual user: organization_id is NULL, user_id is SET (personal account, no org)
+    - Organization-level: organization_id is SET, user_id is NULL (shared by all org members)
+    - Personal override: organization_id is SET, user_id is SET (user's personal within org context)
 
-    Fallback chain: User connection → Org connection → Not connected
+    Fallback chain: Personal override → Org connection → Individual → Not connected
     """
     __tablename__ = "integrations"
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # Organization this integration belongs to
-    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
+    # Organization this integration belongs to (NULL for individual users)
+    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
 
-    # User for personal connections (NULL = org-level shared connection)
+    # User for personal/individual connections
+    # - If org_id is NULL: individual user's integration (no org membership)
+    # - If org_id is SET: personal override within org context
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
 
     # Provider info
@@ -97,14 +100,29 @@ class Integration(Base):
     space_integrations = relationship("SpaceIntegration", back_populates="integration", cascade="all, delete-orphan")
 
     @property
+    def is_individual(self) -> bool:
+        """Check if this is an individual user's integration (no org)."""
+        return self.organization_id is None and self.user_id is not None
+
+    @property
     def is_personal(self) -> bool:
-        """Check if this is a user-level (personal) integration."""
-        return self.user_id is not None
+        """Check if this is a user-level (personal) integration within an org."""
+        return self.organization_id is not None and self.user_id is not None
+
+    @property
+    def is_org_level(self) -> bool:
+        """Check if this is an org-level shared integration."""
+        return self.organization_id is not None and self.user_id is None
 
     @property
     def scope_label(self) -> str:
         """Human-readable scope label."""
-        return "Personal" if self.is_personal else "Organization"
+        if self.is_individual:
+            return "Individual"
+        elif self.is_personal:
+            return "Personal"
+        else:
+            return "Organization"
 
     @property
     def is_token_expired(self) -> bool:
