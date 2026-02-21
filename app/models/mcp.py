@@ -119,6 +119,10 @@ MCP_SCOPES = {
     "task:write": "Create and modify tasks",
     "template:read": "View templates",
     "integration:read": "View integration status",
+    "jira:read": "Read Jira issues, comments, and transitions",
+    "jira:write": "Create, update, delete Jira issues and comments",
+    "confluence:read": "Read Confluence spaces and pages",
+    "confluence:write": "Create, update, delete Confluence pages",
 }
 
 # Map tools to required scopes
@@ -143,4 +147,22 @@ TOOL_REQUIRED_SCOPES = {
     "update_task": ["task:write"],
     "list_templates": ["template:read"],
     "get_template": ["template:read"],
+    # Skills MCP tools (Jira)
+    "jira_search_issues": ["jira:read"],
+    "jira_get_issue": ["jira:read"],
+    "jira_create_issue": ["jira:write"],
+    "jira_update_issue": ["jira:write"],
+    "jira_delete_issue": ["jira:write"],
+    "jira_transition_issue": ["jira:write"],
+    "jira_get_transitions": ["jira:read"],
+    "jira_get_comments": ["jira:read"],
+    "jira_add_comment": ["jira:write"],
+    # Skills MCP tools (Confluence)
+    "confluence_list_spaces": ["confluence:read"],
+    "confluence_get_space": ["confluence:read"],
+    "confluence_list_pages": ["confluence:read"],
+    "confluence_get_page": ["confluence:read"],
+    "confluence_create_page": ["confluence:write"],
+    "confluence_update_page": ["confluence:write"],
+    "confluence_delete_page": ["confluence:write"],
 }

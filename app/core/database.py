@@ -21,7 +21,7 @@ class Base(DeclarativeBase):
 
 
 async def create_db_and_tables():
-    from app.models import canvas, node, okr, user, template, organization, integration, settings  # noqa: F401
+    from app.models import canvas, node, okr, user, template, organization, skill, settings  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

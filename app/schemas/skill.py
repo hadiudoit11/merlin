@@ -1,5 +1,5 @@
 """
-Pydantic schemas for Integrations API.
+Pydantic schemas for Skills API.
 
 Handles external service connections like Confluence, Notion, etc.
 """
@@ -10,8 +10,8 @@ from datetime import datetime
 from enum import Enum
 
 
-class IntegrationProvider(str, Enum):
-    """Supported integration providers."""
+class SkillProvider(str, Enum):
+    """Supported skill providers."""
     CONFLUENCE = "confluence"
     SLACK = "slack"
     NOTION = "notion"
@@ -34,17 +34,17 @@ class SyncStatus(str, Enum):
     DISCONNECTED = "disconnected"
 
 
-# ============ Integration (Org-level connection) ============
+# ============ Skill (Org-level connection) ============
 
-class IntegrationBase(BaseModel):
-    """Base integration fields."""
-    provider: IntegrationProvider
+class SkillBase(BaseModel):
+    """Base skill fields."""
+    provider: SkillProvider
 
 
-class IntegrationResponse(BaseModel):
-    """Integration response (no sensitive tokens)."""
+class SkillResponse(BaseModel):
+    """Skill response (no sensitive tokens)."""
     id: int
-    provider: IntegrationProvider
+    provider: SkillProvider
     status: SyncStatus
     is_connected: bool
     provider_data: Dict[str, Any] = {}
@@ -60,10 +60,10 @@ class IntegrationResponse(BaseModel):
         from_attributes = True
 
 
-class IntegrationBrief(BaseModel):
-    """Brief integration info for lists."""
+class SkillBrief(BaseModel):
+    """Brief skill info for lists."""
     id: int
-    provider: IntegrationProvider
+    provider: SkillProvider
     status: SyncStatus
     is_connected: bool
     site_url: Optional[str] = None
@@ -114,27 +114,27 @@ class ConfluencePageList(BaseModel):
     limit: int
 
 
-# ============ Space Integration ============
+# ============ Space Skill ============
 
-class SpaceIntegrationCreate(BaseModel):
-    """Create space integration request."""
+class SpaceSkillCreate(BaseModel):
+    """Create space skill request."""
     space_id: str
     external_space_key: str
     sync_direction: SyncDirection = SyncDirection.BIDIRECTIONAL
     auto_sync: bool = False
 
 
-class SpaceIntegrationUpdate(BaseModel):
-    """Update space integration settings."""
+class SpaceSkillUpdate(BaseModel):
+    """Update space skill settings."""
     sync_enabled: Optional[bool] = None
     sync_direction: Optional[SyncDirection] = None
     auto_sync: Optional[bool] = None
 
 
-class SpaceIntegrationResponse(BaseModel):
-    """Space integration response."""
+class SpaceSkillResponse(BaseModel):
+    """Space skill response."""
     id: int
-    integration_id: int
+    skill_id: int
     space_id: str
     space_type: str
 
@@ -217,8 +217,8 @@ class ConflictResolution(BaseModel):
 # ============ Provider Info ============
 
 class ProviderInfo(BaseModel):
-    """Information about an integration provider."""
-    id: IntegrationProvider
+    """Information about a skill provider."""
+    id: SkillProvider
     name: str
     description: str
     icon: str

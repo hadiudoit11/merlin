@@ -1,5 +1,5 @@
 """
-Jira Integration Service.
+Jira Skill Service.
 
 Handles OAuth 2.0 authentication and API calls to Jira/Atlassian Cloud.
 Syncs Jira issues bidirectionally with internal Tasks.
@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.models.integration import Integration, IntegrationProvider
+from app.models.skill import Skill, SkillProvider
 
 logger = logging.getLogger(__name__)
 
@@ -285,8 +285,69 @@ class JiraService:
 
             return response.json().get("transitions", [])
 
+    async def get_comments(
+        self, access_token: str, cloud_id: str, issue_key: str
+    ) -> List[Dict]:
+        """Get all comments on an issue."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.API_BASE_URL}/ex/jira/{cloud_id}/rest/api/3/issue/{issue_key}/comment",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
 
-class JiraIntegrationService:
+            if response.status_code != 200:
+                raise JiraError(f"Failed to get comments: {response.status_code}")
+
+            return response.json().get("comments", [])
+
+    async def add_comment(
+        self, access_token: str, cloud_id: str, issue_key: str, body: str
+    ) -> Dict[str, Any]:
+        """Add a comment to an issue (ADF format)."""
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.API_BASE_URL}/ex/jira/{cloud_id}/rest/api/3/issue/{issue_key}/comment",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "body": {
+                        "type": "doc",
+                        "version": 1,
+                        "content": [
+                            {
+                                "type": "paragraph",
+                                "content": [{"type": "text", "text": body}],
+                            }
+                        ],
+                    }
+                },
+            )
+
+            if response.status_code not in (200, 201):
+                logger.error(f"Failed to add comment: {response.text}")
+                raise JiraError(f"Failed to add comment: {response.status_code}")
+
+            return response.json()
+
+    async def delete_issue(
+        self, access_token: str, cloud_id: str, issue_key: str
+    ) -> bool:
+        """Delete an issue."""
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                f"{self.API_BASE_URL}/ex/jira/{cloud_id}/rest/api/3/issue/{issue_key}",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+            if response.status_code not in (200, 204):
+                raise JiraError(f"Failed to delete issue: {response.status_code}")
+
+            return True
+
+
+class JiraSkillService:
     """
     Manages Jira integrations with support for:
     - Individual users (no org membership)
@@ -303,7 +364,7 @@ class JiraIntegrationService:
         organization_id: Optional[int] = None,
         user_id: Optional[int] = None,
         scope: Optional[str] = None,  # "individual", "personal", "organization", or None for fallback
-    ) -> Optional[Integration]:
+    ) -> Optional[Skill]:
         """
         Get Jira integration with fallback chain.
 
@@ -321,10 +382,10 @@ class JiraIntegrationService:
             if not user_id:
                 return None
             result = await session.execute(
-                select(Integration).where(
-                    Integration.organization_id == None,
-                    Integration.user_id == user_id,
-                    Integration.provider == IntegrationProvider.JIRA,
+                select(Skill).where(
+                    Skill.organization_id == None,
+                    Skill.user_id == user_id,
+                    Skill.provider == SkillProvider.JIRA,
                 )
             )
             return result.scalar_one_or_none()
@@ -333,10 +394,10 @@ class JiraIntegrationService:
         if scope == "individual" and user_id:
             # Individual integration (no org context)
             result = await session.execute(
-                select(Integration).where(
-                    Integration.organization_id == None,
-                    Integration.user_id == user_id,
-                    Integration.provider == IntegrationProvider.JIRA,
+                select(Skill).where(
+                    Skill.organization_id == None,
+                    Skill.user_id == user_id,
+                    Skill.provider == SkillProvider.JIRA,
                 )
             )
             return result.scalar_one_or_none()
@@ -344,10 +405,10 @@ class JiraIntegrationService:
         if scope == "personal" and user_id:
             # Personal override within org
             result = await session.execute(
-                select(Integration).where(
-                    Integration.organization_id == organization_id,
-                    Integration.user_id == user_id,
-                    Integration.provider == IntegrationProvider.JIRA,
+                select(Skill).where(
+                    Skill.organization_id == organization_id,
+                    Skill.user_id == user_id,
+                    Skill.provider == SkillProvider.JIRA,
                 )
             )
             return result.scalar_one_or_none()
@@ -355,10 +416,10 @@ class JiraIntegrationService:
         if scope == "organization":
             # Org-level shared
             result = await session.execute(
-                select(Integration).where(
-                    Integration.organization_id == organization_id,
-                    Integration.user_id == None,
-                    Integration.provider == IntegrationProvider.JIRA,
+                select(Skill).where(
+                    Skill.organization_id == organization_id,
+                    Skill.user_id == None,
+                    Skill.provider == SkillProvider.JIRA,
                 )
             )
             return result.scalar_one_or_none()
@@ -367,10 +428,10 @@ class JiraIntegrationService:
         if user_id:
             # First try personal override within org
             result = await session.execute(
-                select(Integration).where(
-                    Integration.organization_id == organization_id,
-                    Integration.user_id == user_id,
-                    Integration.provider == IntegrationProvider.JIRA,
+                select(Skill).where(
+                    Skill.organization_id == organization_id,
+                    Skill.user_id == user_id,
+                    Skill.provider == SkillProvider.JIRA,
                 )
             )
             personal = result.scalar_one_or_none()
@@ -379,10 +440,10 @@ class JiraIntegrationService:
 
         # Fall back to org-level
         result = await session.execute(
-            select(Integration).where(
-                Integration.organization_id == organization_id,
-                Integration.user_id == None,
-                Integration.provider == IntegrationProvider.JIRA,
+            select(Skill).where(
+                Skill.organization_id == organization_id,
+                Skill.user_id == None,
+                Skill.provider == SkillProvider.JIRA,
             )
         )
         return result.scalar_one_or_none()
@@ -399,7 +460,7 @@ class JiraIntegrationService:
         For individual users: Returns individual connection status
         For org members: Returns both org and personal connection status
         """
-        def format_integration(integration: Optional[Integration]) -> Optional[Dict]:
+        def format_integration(integration: Optional[Skill]) -> Optional[Dict]:
             if not integration or not integration.is_connected:
                 return None
             return {
@@ -458,7 +519,7 @@ class JiraIntegrationService:
         site_name: str,
         organization_id: Optional[int] = None,
         scope: str = "individual",  # "individual", "organization", or "personal"
-    ) -> Integration:
+    ) -> Skill:
         """
         Create or update Jira integration.
 
@@ -467,7 +528,7 @@ class JiraIntegrationService:
             organization_id: Org ID (None for individual users)
             scope: "individual" (no org), "organization" (shared), or "personal" (override within org)
         """
-        from app.models.integration import SyncStatus
+        from app.models.skill import SyncStatus
 
         # Determine target IDs based on scope
         if scope == "individual":
@@ -505,11 +566,11 @@ class JiraIntegrationService:
             return existing
 
         # Create new
-        integration = Integration(
+        integration = Skill(
             organization_id=target_org_id,
             user_id=target_user_id,
             connected_by_id=user_id,
-            provider=IntegrationProvider.JIRA,
+            provider=SkillProvider.JIRA,
             access_token=tokens["access_token"],
             refresh_token=tokens.get("refresh_token"),
             token_expires_at=datetime.utcnow() + timedelta(
@@ -554,7 +615,7 @@ class JiraIntegrationService:
         return False
 
     async def get_or_refresh_token(
-        self, session: AsyncSession, integration: Integration
+        self, session: AsyncSession, integration: Skill
     ) -> str:
         """Get a valid access token, refreshing if necessary."""
         if integration.token_expires_at and integration.token_expires_at > datetime.utcnow():
@@ -578,4 +639,4 @@ class JiraIntegrationService:
 
 # Singleton instances
 jira_service = JiraService()
-jira_integration_service = JiraIntegrationService()
+jira_skill_service = JiraSkillService()

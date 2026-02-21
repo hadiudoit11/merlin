@@ -24,7 +24,7 @@ from app.models.okr import Objective, KeyResult, Metric
 from app.models.organization import Organization
 from app.models.template import NodeTemplateContext
 from app.models.settings import AIProviderSettings
-from app.models.integration import Integration, MeetingImport
+from app.models.skill import Skill, MeetingImport
 from app.models.task import Task, InputEvent, task_node_links
 
 # Alembic Config object

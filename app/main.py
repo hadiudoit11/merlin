@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.APP_NAME,
-    description="Miro-style product management canvas with nodes, OKRs, and integrations",
+    description="Miro-style product management canvas with nodes, OKRs, and skills",
     version="0.1.0",
     lifespan=lifespan,
 )

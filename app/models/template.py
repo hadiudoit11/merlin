@@ -220,7 +220,7 @@ Generate a PRD with the following sections:
             "sections": ["overview", "goals", "user_stories", "requirements", "scope", "open_questions"]
         },
         "allowed_inputs": ["problem"],
-        "allowed_outputs": ["doc", "agent", "integration"],
+        "allowed_outputs": ["doc", "agent", "skill"],
         "is_default": True,
     },
     # Doc - Tech Spec
@@ -266,7 +266,7 @@ Generate a technical specification with:
         "system_prompt": """You are helping write documentation. Focus on clarity and completeness.""",
         "generation_prompt": """Create a document based on the provided context.""",
         "allowed_inputs": ["problem", "doc", "objective", "keyresult"],
-        "allowed_outputs": ["doc", "agent", "integration"],
+        "allowed_outputs": ["doc", "agent", "skill"],
         "is_default": True,
     },
 ]

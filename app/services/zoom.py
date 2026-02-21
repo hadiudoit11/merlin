@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.models.integration import Integration, IntegrationProvider, SyncStatus, MeetingImport
+from app.models.skill import Skill, SkillProvider, SyncStatus, MeetingImport
 
 
 class ZoomError(Exception):
@@ -275,7 +275,7 @@ class ZoomService:
             return {"participants": []}
 
 
-class ZoomIntegrationService:
+class ZoomSkillService:
     """Service for managing Zoom integration state."""
 
     def __init__(self):
@@ -285,12 +285,12 @@ class ZoomIntegrationService:
         self,
         session: AsyncSession,
         organization_id: int,
-    ) -> Optional[Integration]:
+    ) -> Optional[Skill]:
         """Get Zoom integration for an organization."""
         result = await session.execute(
-            select(Integration).where(
-                Integration.organization_id == organization_id,
-                Integration.provider == IntegrationProvider.ZOOM,
+            select(Skill).where(
+                Skill.organization_id == organization_id,
+                Skill.provider == SkillProvider.ZOOM,
             )
         )
         return result.scalar_one_or_none()
@@ -298,7 +298,7 @@ class ZoomIntegrationService:
     async def get_or_refresh_token(
         self,
         session: AsyncSession,
-        integration: Integration,
+        integration: Skill,
     ) -> str:
         """Get valid access token, refreshing if expired."""
         if integration.is_token_expired and integration.refresh_token:
@@ -322,15 +322,15 @@ class ZoomIntegrationService:
 
         return integration.access_token
 
-    async def create_integration(
+    async def create_skill(
         self,
         session: AsyncSession,
         organization_id: int,
         user_id: int,
         tokens: Dict[str, Any],
-    ) -> Integration:
-        """Create or update Zoom integration with OAuth tokens."""
-        # Check if integration already exists
+    ) -> Skill:
+        """Create or update Zoom skill with OAuth tokens."""
+        # Check if skill already exists
         integration = await self.get_integration(session, organization_id)
 
         if integration:
@@ -344,9 +344,9 @@ class ZoomIntegrationService:
             integration.connected_by_id = user_id
         else:
             # Create new
-            integration = Integration(
+            integration = Skill(
                 organization_id=organization_id,
-                provider=IntegrationProvider.ZOOM,
+                provider=SkillProvider.ZOOM,
                 access_token=tokens["access_token"],
                 refresh_token=tokens.get("refresh_token"),
                 token_expires_at=datetime.utcnow() + timedelta(
@@ -460,7 +460,7 @@ class ZoomIntegrationService:
 
         # Create import record
         meeting_import = MeetingImport(
-            integration_id=integration.id,
+            skill_id=integration.id,
             canvas_id=canvas_id,
             external_meeting_id=meeting_uuid,
             meeting_topic=recordings.get("topic"),
@@ -487,4 +487,4 @@ class ZoomIntegrationService:
 
 # Singleton instances
 zoom_service = ZoomService()
-zoom_integration_service = ZoomIntegrationService()
+zoom_skill_service = ZoomSkillService()

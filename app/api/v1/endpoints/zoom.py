@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User
 from app.models.task import InputEvent
-from app.services.zoom import zoom_service, zoom_integration_service, ZoomError
+from app.services.zoom import zoom_service, zoom_skill_service, ZoomError
 from app.services.transcript_processor import meeting_import_processor, TranscriptProcessingError
 from app.services.settings_service import SettingsService
 from app.services.input_processor import create_zoom_pipeline, JobContext
@@ -155,7 +155,7 @@ async def zoom_oauth_callback(
         tokens = await zoom_service.exchange_code_for_tokens(code)
 
         # Create/update integration
-        await zoom_integration_service.create_integration(
+        await zoom_skill_service.create_skill(
             session,
             organization_id=state_data["org_id"],
             user_id=state_data["user_id"],
@@ -165,7 +165,7 @@ async def zoom_oauth_callback(
         # Redirect to frontend success page
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/settings/integrations?zoom=connected"
+            url=f"{frontend_url}/settings/skills?zoom=connected"
         )
 
     except ZoomError as e:
@@ -186,14 +186,14 @@ async def get_zoom_status(
     if not org_id:
         return ZoomConnectionStatus(connected=False)
 
-    integration = await zoom_integration_service.get_integration(session, org_id)
+    integration = await zoom_skill_service.get_integration(session, org_id)
 
     if not integration or not integration.is_connected:
         return ZoomConnectionStatus(connected=False)
 
     # Get user info
     try:
-        access_token = await zoom_integration_service.get_or_refresh_token(session, integration)
+        access_token = await zoom_skill_service.get_or_refresh_token(session, integration)
         user_info = await zoom_service.get_current_user(access_token)
 
         return ZoomConnectionStatus(
@@ -213,7 +213,7 @@ async def disconnect_zoom(
     """Disconnect Zoom integration."""
     org_id = await get_user_org_id(session, current_user.id)
 
-    disconnected = await zoom_integration_service.disconnect(session, org_id)
+    disconnected = await zoom_skill_service.disconnect(session, org_id)
 
     if disconnected:
         return {"status": "disconnected"}
@@ -243,7 +243,7 @@ async def list_recordings(
         from_date = datetime.utcnow().replace(hour=0, minute=0, second=0)
         from_date = from_date.replace(day=from_date.day - days) if from_date.day > days else from_date
 
-        recordings = await zoom_integration_service.list_available_recordings(
+        recordings = await zoom_skill_service.list_available_recordings(
             session, org_id, from_date=from_date
         )
 
@@ -277,7 +277,7 @@ async def import_meeting(
     org_id = await get_user_org_id(session, current_user.id)
 
     try:
-        meeting_import = await zoom_integration_service.import_meeting(
+        meeting_import = await zoom_skill_service.import_meeting(
             session,
             organization_id=org_id,
             meeting_uuid=request.meeting_uuid,
@@ -317,7 +317,7 @@ async def get_import_status(
 ):
     """Check the processing status of an imported meeting."""
     from sqlalchemy import select
-    from app.models.integration import MeetingImport
+    from app.models.skill import MeetingImport
 
     result = await session.execute(
         select(MeetingImport).where(MeetingImport.id == import_id)
@@ -354,7 +354,7 @@ async def process_import(
     Use this to retry failed imports or process meetings that weren't auto-processed.
     """
     from sqlalchemy import select
-    from app.models.integration import MeetingImport
+    from app.models.skill import MeetingImport
 
     result = await session.execute(
         select(MeetingImport).where(MeetingImport.id == import_id)
@@ -431,7 +431,7 @@ async def process_zoom_webhook_event(event_id: int, org_id: int, user_id: int):
                 return
 
             # Get integration for org
-            integration = await zoom_integration_service.get_integration(session, org_id)
+            integration = await zoom_skill_service.get_integration(session, org_id)
 
             # Build context
             payload = input_event.payload or {}
@@ -460,7 +460,7 @@ async def process_zoom_webhook_event(event_id: int, org_id: int, user_id: int):
                 try:
                     meeting_uuid = meeting_data.get("uuid")
                     if meeting_uuid and integration:
-                        access_token = await zoom_integration_service.get_or_refresh_token(
+                        access_token = await zoom_skill_service.get_or_refresh_token(
                             session, integration
                         )
                         transcript = await zoom_service.get_meeting_transcript(
@@ -545,30 +545,30 @@ async def zoom_webhook(
     account_id = payload.get("payload", {}).get("account_id")
 
     # Find organization by Zoom account
-    from app.models.integration import Integration, IntegrationProvider
+    from app.models.skill import Skill, SkillProvider
 
     result = await session.execute(
-        select(Integration).where(
-            Integration.provider == IntegrationProvider.ZOOM.value,
-            Integration.is_active == True,
+        select(Skill).where(
+            Skill.provider == SkillProvider.ZOOM.value,
+            Skill.is_active == True,
         )
     )
-    integrations = list(result.scalars().all())
+    skills = list(result.scalars().all())
 
     # Match by account_id in settings
     org_id = None
     user_id = None
-    for integration in integrations:
-        if integration.settings and integration.settings.get("account_id") == account_id:
-            org_id = integration.organization_id
-            user_id = integration.user_id
+    for skill in skills:
+        if skill.settings and skill.settings.get("account_id") == account_id:
+            org_id = skill.organization_id
+            user_id = skill.user_id
             break
 
-    if not org_id and integrations:
-        # Fall back to first active integration
-        integration = integrations[0]
-        org_id = integration.organization_id
-        user_id = integration.user_id
+    if not org_id and skills:
+        # Fall back to first active skill
+        skill = skills[0]
+        org_id = skill.organization_id
+        user_id = skill.user_id
 
     # Only process meeting-related events
     supported_events = ["meeting.ended", "recording.completed"]

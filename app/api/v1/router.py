@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import canvases, nodes, okrs, metrics, auth, organizations, integrations, templates, settings, zoom, jira, tasks, mcp, agent, tokens, projects, artifacts, change_proposals
+from app.api.v1.endpoints import canvases, nodes, okrs, metrics, auth, organizations, skills, templates, settings, zoom, jira, tasks, mcp, agent, tokens, projects, artifacts, change_proposals
 
 api_router = APIRouter()
 
@@ -15,9 +15,9 @@ api_router.include_router(nodes.router, prefix="/nodes", tags=["nodes"])
 api_router.include_router(okrs.router, prefix="/okrs", tags=["okrs"])
 api_router.include_router(metrics.router, prefix="/metrics", tags=["metrics"])
 api_router.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
-api_router.include_router(integrations.router, prefix="/integrations", tags=["integrations"])
-api_router.include_router(zoom.router, prefix="/integrations/zoom", tags=["zoom"])
-api_router.include_router(jira.router, prefix="/integrations/jira", tags=["jira"])
+api_router.include_router(skills.router, prefix="/skills", tags=["skills"])
+api_router.include_router(zoom.router, prefix="/skills/zoom", tags=["zoom"])
+api_router.include_router(jira.router, prefix="/skills/jira", tags=["jira"])
 api_router.include_router(templates.router, prefix="/templates", tags=["templates"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(agent.router, prefix="/agent", tags=["agent"])

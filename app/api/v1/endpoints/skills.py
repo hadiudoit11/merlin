@@ -1,5 +1,5 @@
 """
-Integrations API Endpoints
+Skills API Endpoints
 
 Handles external service connections (Confluence, Notion, etc.)
 including OAuth flows, space linking, and sync operations.
@@ -18,27 +18,27 @@ from app.core.config import settings
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.models.organization import Organization, OrganizationMember
-from app.models.integration import (
-    Integration,
-    SpaceIntegration,
+from app.models.skill import (
+    Skill,
+    SpaceSkill,
     PageSync,
-    IntegrationProvider as ModelProvider,
+    SkillProvider as ModelProvider,
     SyncDirection as ModelSyncDirection,
     SyncStatus as ModelSyncStatus,
 )
-from app.schemas.integration import (
-    IntegrationProvider,
+from app.schemas.skill import (
+    SkillProvider,
     SyncDirection,
     SyncStatus,
-    IntegrationResponse,
-    IntegrationBrief,
+    SkillResponse,
+    SkillBrief,
     OAuthInitResponse,
     ConfluenceSpace,
     ConfluencePage,
     ConfluencePageList,
-    SpaceIntegrationCreate,
-    SpaceIntegrationUpdate,
-    SpaceIntegrationResponse,
+    SpaceSkillCreate,
+    SpaceSkillUpdate,
+    SpaceSkillResponse,
     ImportRequest,
     ExportRequest,
     SyncResult,
@@ -95,45 +95,45 @@ async def get_user_organization(
     return org
 
 
-async def get_integration(
+async def get_skill(
     session: AsyncSession,
     organization_id: int,
     provider: ModelProvider
-) -> Optional[Integration]:
-    """Get integration by provider for an organization."""
+) -> Optional[Skill]:
+    """Get skill by provider for an organization."""
     result = await session.execute(
-        select(Integration)
+        select(Skill)
         .where(
-            Integration.organization_id == organization_id,
-            Integration.provider == provider
+            Skill.organization_id == organization_id,
+            Skill.provider == provider
         )
     )
     return result.scalar_one_or_none()
 
 
-async def require_integration(
+async def require_skill(
     session: AsyncSession,
     organization_id: int,
     provider: ModelProvider
-) -> Integration:
-    """Get integration or raise 404."""
-    integration = await get_integration(session, organization_id, provider)
-    if not integration:
+) -> Skill:
+    """Get skill or raise 404."""
+    skill = await get_skill(session, organization_id, provider)
+    if not skill:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"{provider.value} integration not found"
+            detail=f"{provider.value} skill not found"
         )
-    return integration
+    return skill
 
 
 # ============ Provider Info ============
 
 @router.get("/providers", response_model=List[ProviderInfo])
 async def list_providers() -> List[ProviderInfo]:
-    """List all available integration providers."""
+    """List all available skill providers."""
     return [
         ProviderInfo(
-            id=IntegrationProvider.CONFLUENCE,
+            id=SkillProvider.CONFLUENCE,
             name="Confluence",
             description="Sync documents with Atlassian Confluence",
             icon="confluence",
@@ -142,7 +142,7 @@ async def list_providers() -> List[ProviderInfo]:
             scopes=settings.CONFLUENCE_SCOPES.split(" "),
         ),
         ProviderInfo(
-            id=IntegrationProvider.SLACK,
+            id=SkillProvider.SLACK,
             name="Slack",
             description="Connect to Slack for notifications and sharing",
             icon="slack",
@@ -151,7 +151,7 @@ async def list_providers() -> List[ProviderInfo]:
             scopes=settings.SLACK_SCOPES.split(","),
         ),
         ProviderInfo(
-            id=IntegrationProvider.NOTION,
+            id=SkillProvider.NOTION,
             name="Notion",
             description="Sync pages with Notion workspaces",
             icon="notion",
@@ -162,71 +162,71 @@ async def list_providers() -> List[ProviderInfo]:
     ]
 
 
-# ============ Integration CRUD ============
+# ============ Skill CRUD ============
 
-@router.get("/", response_model=List[IntegrationBrief])
-async def list_integrations(
+@router.get("/", response_model=List[SkillBrief])
+async def list_skills(
     organization_id: Optional[int] = None,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
-) -> List[IntegrationBrief]:
-    """List all integrations for the organization."""
+) -> List[SkillBrief]:
+    """List all skills for the organization."""
     org = await get_user_organization(session, current_user.id, organization_id)
 
     result = await session.execute(
-        select(Integration).where(Integration.organization_id == org.id)
+        select(Skill).where(Skill.organization_id == org.id)
     )
-    integrations = result.scalars().all()
+    skills = result.scalars().all()
 
     return [
-        IntegrationBrief(
+        SkillBrief(
             id=i.id,
-            provider=IntegrationProvider(i.provider.value),
+            provider=SkillProvider(i.provider.value),
             status=SyncStatus(i.status.value),
             is_connected=i.is_connected,
             site_url=i.provider_data.get("site_url") if i.provider_data else None,
         )
-        for i in integrations
+        for i in skills
     ]
 
 
-@router.get("/{provider}", response_model=IntegrationResponse)
-async def get_integration_by_provider(
-    provider: IntegrationProvider,
+@router.get("/{provider}", response_model=SkillResponse)
+async def get_skill_by_provider(
+    provider: SkillProvider,
     organization_id: Optional[int] = None,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
-) -> IntegrationResponse:
-    """Get a specific integration by provider."""
+) -> SkillResponse:
+    """Get a specific skill by provider."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider(provider.value))
+    skill = await require_skill(session, org.id, ModelProvider(provider.value))
 
-    return IntegrationResponse(
-        id=integration.id,
-        provider=IntegrationProvider(integration.provider.value),
-        status=SyncStatus(integration.status.value),
-        is_connected=integration.is_connected,
-        provider_data=integration.provider_data or {},
-        connected_by_id=integration.connected_by_id,
-        created_at=integration.created_at,
-        updated_at=integration.updated_at,
-        site_url=integration.provider_data.get("site_url") if integration.provider_data else None,
-        cloud_id=integration.provider_data.get("cloud_id") if integration.provider_data else None,
+    return SkillResponse(
+        id=skill.id,
+        provider=SkillProvider(skill.provider.value),
+        status=SyncStatus(skill.status.value),
+        is_connected=skill.is_connected,
+        provider_data=skill.provider_data or {},
+        connected_by_id=skill.connected_by_id,
+        created_at=skill.created_at,
+        updated_at=skill.updated_at,
+        site_url=skill.provider_data.get("site_url") if skill.provider_data else None,
+        cloud_id=skill.provider_data.get("cloud_id") if skill.provider_data else None,
     )
 
 
 @router.delete("/{provider}", status_code=status.HTTP_204_NO_CONTENT)
-async def disconnect_integration(
-    provider: IntegrationProvider,
+async def disconnect_skill(
+    provider: SkillProvider,
     organization_id: Optional[int] = None,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    """Disconnect an integration. This removes all tokens and space links."""
+    """Disconnect a skill. This removes all tokens and space links."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider(provider.value))
+    skill = await require_skill(session, org.id, ModelProvider(provider.value))
 
-    await session.delete(integration)
+    await session.delete(skill)
     await session.commit()
 
 
@@ -242,13 +242,13 @@ async def initiate_confluence_oauth(
     if not settings.CONFLUENCE_CONFIGURED:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Confluence integration is not configured"
+            detail="Confluence skill is not configured"
         )
 
     org = await get_user_organization(session, current_user.id, organization_id)
 
     # Check if already connected
-    existing = await get_integration(session, org.id, ModelProvider.CONFLUENCE)
+    existing = await get_skill(session, org.id, ModelProvider.CONFLUENCE)
     if existing and existing.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -281,7 +281,7 @@ async def confluence_oauth_callback(
     Handle Confluence OAuth callback.
 
     This endpoint is called by Atlassian after user authorizes.
-    It exchanges the code for tokens and stores the integration.
+    It exchanges the code for tokens and stores the skill.
     """
     # Validate state
     state_data = _oauth_states.pop(state, None)
@@ -327,22 +327,22 @@ async def confluence_oauth_callback(
 
         await service.close()
 
-        # Create or update integration
-        integration = await get_integration(session, organization_id, ModelProvider.CONFLUENCE)
+        # Create or update skill
+        skill = await get_skill(session, organization_id, ModelProvider.CONFLUENCE)
 
-        if integration:
-            integration.access_token = access_token
-            integration.refresh_token = refresh_token
-            integration.token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
-            integration.provider_data = {
+        if skill:
+            skill.access_token = access_token
+            skill.refresh_token = refresh_token
+            skill.token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+            skill.provider_data = {
                 "cloud_id": cloud_id,
                 "site_url": site_url,
                 "site_name": site_name,
             }
-            integration.status = ModelSyncStatus.IDLE
-            integration.connected_by_id = user_id
+            skill.status = ModelSyncStatus.IDLE
+            skill.connected_by_id = user_id
         else:
-            integration = Integration(
+            skill = Skill(
                 organization_id=organization_id,
                 provider=ModelProvider.CONFLUENCE,
                 access_token=access_token,
@@ -356,14 +356,14 @@ async def confluence_oauth_callback(
                 status=ModelSyncStatus.IDLE,
                 connected_by_id=user_id,
             )
-            session.add(integration)
+            session.add(skill)
 
         await session.commit()
 
         # Redirect back to frontend
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/settings/integrations?connected=confluence",
+            url=f"{frontend_url}/settings/skills?connected=confluence",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -371,7 +371,7 @@ async def confluence_oauth_callback(
         # Redirect with error
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/settings/integrations?error=confluence_connect_failed",
+            url=f"{frontend_url}/settings/skills?error=confluence_connect_failed",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -386,17 +386,17 @@ async def list_confluence_spaces(
 ) -> List[ConfluenceSpace]:
     """List available Confluence spaces."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.CONFLUENCE)
+    skill = await require_skill(session, org.id, ModelProvider.CONFLUENCE)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Confluence is not connected"
         )
 
     service = ConfluenceService(
-        access_token=integration.access_token,
-        cloud_id=integration.provider_data.get("cloud_id"),
+        access_token=skill.access_token,
+        cloud_id=skill.provider_data.get("cloud_id"),
     )
 
     try:
@@ -417,17 +417,17 @@ async def list_confluence_pages(
 ) -> ConfluencePageList:
     """List pages in a Confluence space."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.CONFLUENCE)
+    skill = await require_skill(session, org.id, ModelProvider.CONFLUENCE)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Confluence is not connected"
         )
 
     service = ConfluenceService(
-        access_token=integration.access_token,
-        cloud_id=integration.provider_data.get("cloud_id"),
+        access_token=skill.access_token,
+        cloud_id=skill.provider_data.get("cloud_id"),
     )
 
     try:
@@ -451,67 +451,67 @@ async def list_confluence_pages(
         await service.close()
 
 
-# ============ Space Integrations ============
+# ============ Space Skills ============
 
-@router.get("/spaces/{space_id}", response_model=Optional[SpaceIntegrationResponse])
-async def get_space_integration(
+@router.get("/spaces/{space_id}", response_model=Optional[SpaceSkillResponse])
+async def get_space_skill(
     space_id: str,
-    provider: IntegrationProvider = Query(...),
+    provider: SkillProvider = Query(...),
     organization_id: Optional[int] = None,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
-) -> Optional[SpaceIntegrationResponse]:
-    """Get space integration for a specific provider."""
+) -> Optional[SpaceSkillResponse]:
+    """Get space skill for a specific provider."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await get_integration(session, org.id, ModelProvider(provider.value))
+    skill = await get_skill(session, org.id, ModelProvider(provider.value))
 
-    if not integration:
+    if not skill:
         return None
 
     result = await session.execute(
-        select(SpaceIntegration)
+        select(SpaceSkill)
         .where(
-            SpaceIntegration.integration_id == integration.id,
-            SpaceIntegration.space_id == space_id,
+            SpaceSkill.skill_id == skill.id,
+            SpaceSkill.space_id == space_id,
         )
     )
-    space_int = result.scalar_one_or_none()
+    space_sk = result.scalar_one_or_none()
 
-    if not space_int:
+    if not space_sk:
         return None
 
-    return SpaceIntegrationResponse(
-        id=space_int.id,
-        integration_id=space_int.integration_id,
-        space_id=space_int.space_id,
-        space_type=space_int.space_type,
-        external_space_key=space_int.external_space_key,
-        external_space_id=space_int.external_space_id,
-        external_space_name=space_int.external_space_name,
-        sync_enabled=space_int.sync_enabled,
-        sync_direction=SyncDirection(space_int.sync_direction.value),
-        auto_sync=space_int.auto_sync,
-        sync_status=SyncStatus(space_int.sync_status.value),
-        last_sync_at=space_int.last_sync_at,
-        last_sync_error=space_int.last_sync_error,
-        created_at=space_int.created_at,
-        updated_at=space_int.updated_at,
+    return SpaceSkillResponse(
+        id=space_sk.id,
+        skill_id=space_sk.skill_id,
+        space_id=space_sk.space_id,
+        space_type=space_sk.space_type,
+        external_space_key=space_sk.external_space_key,
+        external_space_id=space_sk.external_space_id,
+        external_space_name=space_sk.external_space_name,
+        sync_enabled=space_sk.sync_enabled,
+        sync_direction=SyncDirection(space_sk.sync_direction.value),
+        auto_sync=space_sk.auto_sync,
+        sync_status=SyncStatus(space_sk.sync_status.value),
+        last_sync_at=space_sk.last_sync_at,
+        last_sync_error=space_sk.last_sync_error,
+        created_at=space_sk.created_at,
+        updated_at=space_sk.updated_at,
     )
 
 
-@router.post("/spaces/{space_id}/confluence", response_model=SpaceIntegrationResponse)
+@router.post("/spaces/{space_id}/confluence", response_model=SpaceSkillResponse)
 async def link_space_to_confluence(
     space_id: str,
-    data: SpaceIntegrationCreate,
+    data: SpaceSkillCreate,
     organization_id: Optional[int] = None,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
-) -> SpaceIntegrationResponse:
+) -> SpaceSkillResponse:
     """Link a Merlin space to a Confluence space."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.CONFLUENCE)
+    skill = await require_skill(session, org.id, ModelProvider.CONFLUENCE)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Confluence is not connected"
@@ -519,10 +519,10 @@ async def link_space_to_confluence(
 
     # Check if already linked
     result = await session.execute(
-        select(SpaceIntegration)
+        select(SpaceSkill)
         .where(
-            SpaceIntegration.integration_id == integration.id,
-            SpaceIntegration.space_id == space_id,
+            SpaceSkill.skill_id == skill.id,
+            SpaceSkill.space_id == space_id,
         )
     )
     if result.scalar_one_or_none():
@@ -533,8 +533,8 @@ async def link_space_to_confluence(
 
     # Verify the Confluence space exists
     service = ConfluenceService(
-        access_token=integration.access_token,
-        cloud_id=integration.provider_data.get("cloud_id"),
+        access_token=skill.access_token,
+        cloud_id=skill.provider_data.get("cloud_id"),
     )
 
     try:
@@ -547,9 +547,9 @@ async def link_space_to_confluence(
     finally:
         await service.close()
 
-    # Create space integration
-    space_int = SpaceIntegration(
-        integration_id=integration.id,
+    # Create space skill
+    space_sk = SpaceSkill(
+        skill_id=skill.id,
         space_id=space_id,
         space_type="document",
         external_space_key=confluence_space.key,
@@ -560,26 +560,26 @@ async def link_space_to_confluence(
         auto_sync=data.auto_sync,
         sync_status=ModelSyncStatus.IDLE,
     )
-    session.add(space_int)
+    session.add(space_sk)
     await session.commit()
-    await session.refresh(space_int)
+    await session.refresh(space_sk)
 
-    return SpaceIntegrationResponse(
-        id=space_int.id,
-        integration_id=space_int.integration_id,
-        space_id=space_int.space_id,
-        space_type=space_int.space_type,
-        external_space_key=space_int.external_space_key,
-        external_space_id=space_int.external_space_id,
-        external_space_name=space_int.external_space_name,
-        sync_enabled=space_int.sync_enabled,
-        sync_direction=SyncDirection(space_int.sync_direction.value),
-        auto_sync=space_int.auto_sync,
-        sync_status=SyncStatus(space_int.sync_status.value),
-        last_sync_at=space_int.last_sync_at,
-        last_sync_error=space_int.last_sync_error,
-        created_at=space_int.created_at,
-        updated_at=space_int.updated_at,
+    return SpaceSkillResponse(
+        id=space_sk.id,
+        skill_id=space_sk.skill_id,
+        space_id=space_sk.space_id,
+        space_type=space_sk.space_type,
+        external_space_key=space_sk.external_space_key,
+        external_space_id=space_sk.external_space_id,
+        external_space_name=space_sk.external_space_name,
+        sync_enabled=space_sk.sync_enabled,
+        sync_direction=SyncDirection(space_sk.sync_direction.value),
+        auto_sync=space_sk.auto_sync,
+        sync_status=SyncStatus(space_sk.sync_status.value),
+        last_sync_at=space_sk.last_sync_at,
+        last_sync_error=space_sk.last_sync_error,
+        created_at=space_sk.created_at,
+        updated_at=space_sk.updated_at,
     )
 
 
@@ -592,22 +592,22 @@ async def unlink_space_from_confluence(
 ):
     """Unlink a Merlin space from Confluence."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await get_integration(session, org.id, ModelProvider.CONFLUENCE)
+    skill = await get_skill(session, org.id, ModelProvider.CONFLUENCE)
 
-    if not integration:
+    if not skill:
         return
 
     result = await session.execute(
-        select(SpaceIntegration)
+        select(SpaceSkill)
         .where(
-            SpaceIntegration.integration_id == integration.id,
-            SpaceIntegration.space_id == space_id,
+            SpaceSkill.skill_id == skill.id,
+            SpaceSkill.space_id == space_id,
         )
     )
-    space_int = result.scalar_one_or_none()
+    space_sk = result.scalar_one_or_none()
 
-    if space_int:
-        await session.delete(space_int)
+    if space_sk:
+        await session.delete(space_sk)
         await session.commit()
 
 
@@ -623,33 +623,33 @@ async def import_from_confluence(
 ) -> SyncResult:
     """Import pages from Confluence into Merlin."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.CONFLUENCE)
+    skill = await require_skill(session, org.id, ModelProvider.CONFLUENCE)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Confluence is not connected"
         )
 
-    # Get space integration
+    # Get space skill
     result = await session.execute(
-        select(SpaceIntegration)
+        select(SpaceSkill)
         .where(
-            SpaceIntegration.integration_id == integration.id,
-            SpaceIntegration.space_id == space_id,
+            SpaceSkill.skill_id == skill.id,
+            SpaceSkill.space_id == space_id,
         )
     )
-    space_int = result.scalar_one_or_none()
+    space_sk = result.scalar_one_or_none()
 
-    if not space_int:
+    if not space_sk:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Space is not linked to Confluence"
         )
 
     service = ConfluenceService(
-        access_token=integration.access_token,
-        cloud_id=integration.provider_data.get("cloud_id"),
+        access_token=skill.access_token,
+        cloud_id=skill.provider_data.get("cloud_id"),
     )
 
     sync_result = SyncResult(success=True)
@@ -671,7 +671,7 @@ async def import_from_confluence(
 
                 # Create page sync record
                 page_sync = PageSync(
-                    space_integration_id=space_int.id,
+                    space_skill_id=space_sk.id,
                     page_id=f"merlin-{page_id}",  # Would be real Merlin page ID
                     external_page_id=page_id,
                     external_page_url=page.web_url,
@@ -688,9 +688,9 @@ async def import_from_confluence(
             except Exception as e:
                 sync_result.errors.append(f"Failed to import {page_id}: {str(e)}")
 
-        # Update space integration
-        space_int.last_sync_at = datetime.utcnow()
-        space_int.sync_status = ModelSyncStatus.IDLE
+        # Update space skill
+        space_sk.last_sync_at = datetime.utcnow()
+        space_sk.sync_status = ModelSyncStatus.IDLE
 
         await session.commit()
 
@@ -713,25 +713,25 @@ async def export_to_confluence(
 ) -> SyncResult:
     """Export pages from Merlin to Confluence."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.CONFLUENCE)
+    skill = await require_skill(session, org.id, ModelProvider.CONFLUENCE)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Confluence is not connected"
         )
 
-    # Get space integration
+    # Get space skill
     result = await session.execute(
-        select(SpaceIntegration)
+        select(SpaceSkill)
         .where(
-            SpaceIntegration.integration_id == integration.id,
-            SpaceIntegration.space_id == space_id,
+            SpaceSkill.skill_id == skill.id,
+            SpaceSkill.space_id == space_id,
         )
     )
-    space_int = result.scalar_one_or_none()
+    space_sk = result.scalar_one_or_none()
 
-    if not space_int:
+    if not space_sk:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Space is not linked to Confluence"
@@ -764,13 +764,13 @@ async def initiate_slack_oauth(
     if not settings.SLACK_CONFIGURED:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Slack integration is not configured"
+            detail="Slack skill is not configured"
         )
 
     org = await get_user_organization(session, current_user.id, organization_id)
 
     # Check if already connected
-    existing = await get_integration(session, org.id, ModelProvider.SLACK)
+    existing = await get_skill(session, org.id, ModelProvider.SLACK)
     if existing and existing.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -804,7 +804,7 @@ async def slack_oauth_callback(
     Handle Slack OAuth callback.
 
     This endpoint is called by Slack after user authorizes.
-    It exchanges the code for tokens and stores the integration.
+    It exchanges the code for tokens and stores the skill.
     """
     # Validate state
     state_data = _oauth_states.pop(state, None)
@@ -845,8 +845,8 @@ async def slack_oauth_callback(
 
         await service.close()
 
-        # Create or update integration
-        integration = await get_integration(session, organization_id, ModelProvider.SLACK)
+        # Create or update skill
+        skill = await get_skill(session, organization_id, ModelProvider.SLACK)
 
         provider_data = {
             "team_id": team_id,
@@ -855,15 +855,15 @@ async def slack_oauth_callback(
             "team_icon": team_icon,
         }
 
-        if integration:
-            integration.access_token = access_token
-            integration.refresh_token = None  # Slack doesn't use refresh tokens
-            integration.token_expires_at = None  # Slack tokens don't expire
-            integration.provider_data = provider_data
-            integration.status = ModelSyncStatus.IDLE
-            integration.connected_by_id = user_id
+        if skill:
+            skill.access_token = access_token
+            skill.refresh_token = None  # Slack doesn't use refresh tokens
+            skill.token_expires_at = None  # Slack tokens don't expire
+            skill.provider_data = provider_data
+            skill.status = ModelSyncStatus.IDLE
+            skill.connected_by_id = user_id
         else:
-            integration = Integration(
+            skill = Skill(
                 organization_id=organization_id,
                 provider=ModelProvider.SLACK,
                 access_token=access_token,
@@ -873,14 +873,14 @@ async def slack_oauth_callback(
                 status=ModelSyncStatus.IDLE,
                 connected_by_id=user_id,
             )
-            session.add(integration)
+            session.add(skill)
 
         await session.commit()
 
         # Redirect back to frontend
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/settings/integrations?connected=slack",
+            url=f"{frontend_url}/settings/skills?connected=slack",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -888,7 +888,7 @@ async def slack_oauth_callback(
         # Redirect with error
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/settings/integrations?error=slack_connect_failed",
+            url=f"{frontend_url}/settings/skills?error=slack_connect_failed",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -903,15 +903,15 @@ async def get_slack_team(
 ) -> SlackTeam:
     """Get information about the connected Slack workspace."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.SLACK)
+    skill = await require_skill(session, org.id, ModelProvider.SLACK)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Slack is not connected"
         )
 
-    service = SlackService(access_token=integration.access_token)
+    service = SlackService(access_token=skill.access_token)
 
     try:
         team = await service.get_team_info()
@@ -939,15 +939,15 @@ async def list_slack_channels(
 ) -> SlackChannelList:
     """List channels in the Slack workspace."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.SLACK)
+    skill = await require_skill(session, org.id, ModelProvider.SLACK)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Slack is not connected"
         )
 
-    service = SlackService(access_token=integration.access_token)
+    service = SlackService(access_token=skill.access_token)
 
     try:
         result = await service.list_channels(
@@ -985,15 +985,15 @@ async def get_slack_channel(
 ) -> SlackChannel:
     """Get information about a specific Slack channel."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.SLACK)
+    skill = await require_skill(session, org.id, ModelProvider.SLACK)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Slack is not connected"
         )
 
-    service = SlackService(access_token=integration.access_token)
+    service = SlackService(access_token=skill.access_token)
 
     try:
         channel = await service.get_channel_info(channel_id)
@@ -1025,15 +1025,15 @@ async def get_slack_channel_messages(
 ) -> SlackMessageList:
     """Get message history for a Slack channel."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.SLACK)
+    skill = await require_skill(session, org.id, ModelProvider.SLACK)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Slack is not connected"
         )
 
-    service = SlackService(access_token=integration.access_token)
+    service = SlackService(access_token=skill.access_token)
 
     try:
         result = await service.get_channel_history(
@@ -1076,15 +1076,15 @@ async def get_slack_thread_replies(
 ) -> SlackMessageList:
     """Get replies in a Slack thread."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.SLACK)
+    skill = await require_skill(session, org.id, ModelProvider.SLACK)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Slack is not connected"
         )
 
-    service = SlackService(access_token=integration.access_token)
+    service = SlackService(access_token=skill.access_token)
 
     try:
         result = await service.get_thread_replies(
@@ -1123,15 +1123,15 @@ async def post_slack_message(
 ) -> SlackMessage:
     """Post a message to a Slack channel."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.SLACK)
+    skill = await require_skill(session, org.id, ModelProvider.SLACK)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Slack is not connected"
         )
 
-    service = SlackService(access_token=integration.access_token)
+    service = SlackService(access_token=skill.access_token)
 
     try:
         message = await service.post_message(
@@ -1164,15 +1164,15 @@ async def list_slack_users(
 ) -> SlackUserList:
     """List users in the Slack workspace."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.SLACK)
+    skill = await require_skill(session, org.id, ModelProvider.SLACK)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Slack is not connected"
         )
 
-    service = SlackService(access_token=integration.access_token)
+    service = SlackService(access_token=skill.access_token)
 
     try:
         result = await service.list_users(limit=limit, cursor=cursor)
@@ -1206,15 +1206,15 @@ async def get_slack_user(
 ) -> SlackUser:
     """Get information about a specific Slack user."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.SLACK)
+    skill = await require_skill(session, org.id, ModelProvider.SLACK)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Slack is not connected"
         )
 
-    service = SlackService(access_token=integration.access_token)
+    service = SlackService(access_token=skill.access_token)
 
     try:
         user = await service.get_user_info(user_id)
@@ -1243,15 +1243,15 @@ async def search_slack_messages(
 ) -> SlackSearchResult:
     """Search for messages in Slack (requires search:read scope)."""
     org = await get_user_organization(session, current_user.id, organization_id)
-    integration = await require_integration(session, org.id, ModelProvider.SLACK)
+    skill = await require_skill(session, org.id, ModelProvider.SLACK)
 
-    if not integration.is_connected:
+    if not skill.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Slack is not connected"
         )
 
-    service = SlackService(access_token=integration.access_token)
+    service = SlackService(access_token=skill.access_token)
 
     try:
         result = await service.search_messages(

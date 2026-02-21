@@ -1,6 +1,24 @@
 # CLAUDE.md - Merlin Backend
 
-FastAPI backend for Miro-style product management canvas with nodes, OKRs, metrics, AI-powered templates, and external integrations.
+## Session Context & Task Log Instructions
+
+**Purpose**: This file serves as persistent context across terminal/session restarts. Claude should always read this file at the start of a session to understand the current state of work.
+
+### Rules for Claude
+1. **Task Logging**: Maintain a running log in `TASK_LOG.md` at the project root. For each task, record:
+   - What the task is
+   - Why it's being done (reasoning/motivation)
+   - Current status (pending, in-progress, completed, blocked)
+   - Any decisions made and their rationale
+2. **Update on completion**: When a task is finished, mark it as completed in `TASK_LOG.md` with a brief summary of what was done.
+3. **Context preservation**: Before ending a session or when wrapping up work, update `TASK_LOG.md` so the next session has full context.
+4. **Decision log**: Record architectural decisions, trade-offs, and rationale in `TASK_LOG.md`.
+5. **Blockers & open questions**: Note anything blocked or needing user input in `TASK_LOG.md`.
+6. **Always read `TASK_LOG.md` at the start of a session** to understand current state of work.
+
+---
+
+FastAPI backend for Miro-style product management canvas with nodes, OKRs, metrics, AI-powered templates, and external skills.
 
 ## Tech Stack
 
@@ -56,17 +74,17 @@ Merlin/
 │   │   ├── template.py           # AI node templates
 │   │   ├── settings.py           # AI provider settings
 │   │   ├── task.py               # Tasks + InputEvent for webhook processing
-│   │   └── integration.py        # External integrations + MeetingImport
+│   │   └── skill.py              # External skills + MeetingImport
 │   ├── schemas/                  # Pydantic request/response models
 │   ├── services/
 │   │   ├── template_service.py   # Template resolution
 │   │   ├── settings_service.py   # API key management
 │   │   ├── indexing_service.py   # Pinecone + embeddings
-│   │   ├── input_processor.py    # Job pipeline for integration events
+│   │   ├── input_processor.py    # Job pipeline for skill events
 │   │   ├── zoom.py               # Zoom OAuth + API
 │   │   ├── transcript_processor.py # AI meeting notes extraction
-│   │   ├── confluence.py         # Confluence integration
-│   │   └── slack.py              # Slack integration
+│   │   ├── confluence.py         # Confluence skill
+│   │   └── slack.py              # Slack skill
 │   └── api/v1/endpoints/
 │       ├── auth.py               # Auth (Auth0 + legacy JWT)
 │       ├── canvases.py           # Canvas CRUD
@@ -76,8 +94,8 @@ Merlin/
 │       ├── tasks.py              # Task CRUD + node linking
 │       ├── templates.py          # AI templates API
 │       ├── settings.py           # AI provider settings API
-│       ├── zoom.py               # Zoom integration API + webhooks
-│       ├── integrations.py       # Confluence/Slack
+│       ├── zoom.py               # Zoom skill API + webhooks
+│       ├── skills.py             # Confluence/Slack skills
 │       └── organizations.py      # Org management
 ├── mcp_server.py                 # MCP server for Claude
 ├── alembic/                      # Database migrations
@@ -122,13 +140,13 @@ Base URL: `http://localhost:8000/api/v1`
 - `POST /settings/index/canvas` - Index canvas for search
 - `POST /settings/search` - Semantic search across canvases
 
-### Zoom Integration
-- `GET /integrations/zoom/connect` - Start OAuth
-- `GET /integrations/zoom/status` - Connection status
-- `GET /integrations/zoom/recordings` - List available recordings
-- `POST /integrations/zoom/import` - Import meeting with transcript
-- `GET /integrations/zoom/import/{id}/status` - Check processing status
-- `POST /integrations/zoom/webhook` - Receive Zoom webhook events
+### Zoom Skill
+- `GET /skills/zoom/connect` - Start OAuth
+- `GET /skills/zoom/status` - Connection status
+- `GET /skills/zoom/recordings` - List available recordings
+- `POST /skills/zoom/import` - Import meeting with transcript
+- `GET /skills/zoom/import/{id}/status` - Check processing status
+- `POST /skills/zoom/webhook` - Receive Zoom webhook events
 
 ### Tasks
 - `GET /tasks/` - List tasks with filters (status, priority, source, canvas, assignee)
@@ -151,7 +169,7 @@ PROBLEM = "problem"      # Blocker connected to Key Results
 OBJECTIVE = "objective"  # OKR objective
 KEYRESULT = "keyresult"  # Measurable outcome
 METRIC = "metric"        # Tracked measurement
-INTEGRATION = "integration"
+SKILL = "skill"
 WEBHOOK = "webhook"
 API = "api"
 MCP = "mcp"
@@ -200,7 +218,7 @@ Namespace strategy:
 
 Background indexing triggers on node create/update/delete.
 
-## Zoom Integration
+## Zoom Skill
 
 Flow:
 1. OAuth connect → stores tokens per organization
@@ -212,25 +230,25 @@ Flow:
    - Creates Task entities for action items
 
 Webhook support:
-- Configure webhook URL: `https://your-domain/api/v1/integrations/zoom/webhook`
+- Configure webhook URL: `https://your-domain/api/v1/skills/zoom/webhook`
 - Events: `meeting.ended`, `recording.completed`
 - Automatically triggers transcript processing pipeline
 
-## Jira Integration
+## Jira Skill
 
 Bidirectional sync between Jira issues and internal Tasks.
 
 ### API Endpoints
-- `GET /integrations/jira/connect` - Start OAuth
-- `GET /integrations/jira/status` - Connection status
-- `DELETE /integrations/jira/disconnect` - Disconnect
-- `POST /integrations/jira/import` - Bulk import issues via JQL
-- `POST /integrations/jira/push` - Push internal task to Jira
-- `POST /integrations/jira/webhook` - Receive Jira webhook events
+- `GET /skills/jira/connect` - Start OAuth
+- `GET /skills/jira/status` - Connection status
+- `DELETE /skills/jira/disconnect` - Disconnect
+- `POST /skills/jira/import` - Bulk import issues via JQL
+- `POST /skills/jira/push` - Push internal task to Jira
+- `POST /skills/jira/webhook` - Receive Jira webhook events
 
 ### Import Example
 ```bash
-POST /api/v1/integrations/jira/import
+POST /api/v1/skills/jira/import
 {
   "jql": "project = PROJ AND status != Done",
   "canvas_id": 5
@@ -239,7 +257,7 @@ POST /api/v1/integrations/jira/import
 
 ### Push to Jira Example
 ```bash
-POST /api/v1/integrations/jira/push
+POST /api/v1/skills/jira/push
 {
   "task_id": 123,
   "project_key": "PROJ",
@@ -262,7 +280,7 @@ POST /api/v1/integrations/jira/push
 
 ## Input Processor Pipeline
 
-Extensible job-based system for processing integration events (webhooks, imports).
+Extensible job-based system for processing skill events (webhooks, imports).
 
 ```
 Webhook/Event → InputEvent → InputProcessor → Jobs → Results
@@ -381,19 +399,19 @@ DEFAULT_PINECONE_INDEX_NAME=merlin-canvas
 # Zoom
 ZOOM_CLIENT_ID=
 ZOOM_CLIENT_SECRET=
-ZOOM_REDIRECT_URI=http://localhost:8000/api/v1/integrations/zoom/callback
+ZOOM_REDIRECT_URI=http://localhost:8000/api/v1/skills/zoom/callback
 ZOOM_WEBHOOK_SECRET_TOKEN=  # For webhook signature verification
 
 # Jira (Atlassian)
 JIRA_CLIENT_ID=
 JIRA_CLIENT_SECRET=
-JIRA_REDIRECT_URI=http://localhost:8000/api/v1/integrations/jira/callback
+JIRA_REDIRECT_URI=http://localhost:8000/api/v1/skills/jira/callback
 JIRA_WEBHOOK_SECRET=
 
 # Confluence
 CONFLUENCE_CLIENT_ID=
 CONFLUENCE_CLIENT_SECRET=
-CONFLUENCE_REDIRECT_URI=http://localhost:8000/api/v1/integrations/confluence/callback
+CONFLUENCE_REDIRECT_URI=http://localhost:8000/api/v1/skills/confluence/callback
 
 # Slack
 SLACK_CLIENT_ID=
@@ -401,7 +419,9 @@ SLACK_CLIENT_SECRET=
 SLACK_SIGNING_SECRET=
 ```
 
-## MCP Server
+## MCP Servers
+
+### Canvas MCP Server
 
 Exposes canvas context to Claude via MCP protocol:
 
@@ -414,6 +434,36 @@ Tools available:
 - `get_template` - Get specific template with AI prompts
 - `get_node_context` - Full context for generating content
 - `get_connection_rules` - Canvas hierarchy rules
+
+### Skills MCP Server (Jira & Confluence)
+
+Exposes CRUD operations on Jira issues and Confluence pages:
+
+```bash
+python skills_mcp_server.py
+```
+
+**Jira Tools (9):**
+- `jira_search_issues` - Search via JQL
+- `jira_get_issue` - Get issue details
+- `jira_create_issue` - Create issue
+- `jira_update_issue` - Update issue fields
+- `jira_delete_issue` - Delete issue
+- `jira_transition_issue` - Change status
+- `jira_get_transitions` - List available transitions
+- `jira_get_comments` - List comments
+- `jira_add_comment` - Add comment
+
+**Confluence Tools (7):**
+- `confluence_list_spaces` - List spaces
+- `confluence_get_space` - Get space details
+- `confluence_list_pages` - List pages in space
+- `confluence_get_page` - Get page content
+- `confluence_create_page` - Create page
+- `confluence_update_page` - Update page
+- `confluence_delete_page` - Delete page
+
+Requires `MCP_USER_ID` env var for skill lookup and audit logging.
 
 ## Key Files Reference
 
@@ -428,4 +478,6 @@ Tools available:
 | Input Processor | `services/input_processor.py`, `models/task.py` (InputEvent) |
 | Zoom | `services/zoom.py`, `services/transcript_processor.py`, `endpoints/zoom.py` |
 | Jira | `services/jira.py`, `services/jira_processor.py`, `endpoints/jira.py` |
-| MCP | `mcp_server.py` |
+| Skills | `models/skill.py`, `schemas/skill.py`, `endpoints/skills.py` |
+| MCP (Canvas) | `mcp_server.py` |
+| MCP (Skills) | `skills_mcp_server.py` |

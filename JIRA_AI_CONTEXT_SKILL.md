@@ -160,7 +160,7 @@ linked_ids = await JiraContextService.auto_link_relevant_issues(
 
 ## API Endpoints
 
-Add these to `/api/v1/integrations/jira.py`:
+Add these to `/api/v1/skills/jira.py`:
 
 ### Index Issues
 ```python
@@ -220,7 +220,7 @@ async def search_jira_context(
 
 ---
 
-## Frontend Integration
+## Frontend Skill
 
 ### 1. Auto-Index on Import
 
@@ -229,7 +229,7 @@ Modify `JiraImportDialog.tsx`:
 ```tsx
 const handleImport = async () => {
   // Import issues
-  const result = await integrationsApi.importFromJira({ jql, canvasId });
+  const result = await skillsApi.importFromJira({ jql, canvasId });
 
   toast({
     title: 'Import Complete',
@@ -238,7 +238,7 @@ const handleImport = async () => {
 
   // Auto-index for AI context
   try {
-    await integrationsApi.indexJiraIssuesForCanvas(canvasId);
+    await skillsApi.indexJiraIssuesForCanvas(canvasId);
     toast({
       title: 'Indexed for AI',
       description: 'Issues are now available as AI context',
@@ -261,7 +261,7 @@ When editing a Problem node, show related Jira issues:
 const { data: relatedIssues } = useQuery({
   queryKey: ['jira-context', problemNode.content],
   queryFn: async () => {
-    const result = await integrationsApi.searchJiraContext({
+    const result = await skillsApi.searchJiraContext({
       query: problemNode.content,
       canvasId: problemNode.canvas_id,
       topK: 5,
@@ -305,7 +305,7 @@ When using AI to generate/refine node content:
 ```tsx
 const generateProblemContent = async () => {
   // Search for relevant Jira issues first
-  const contextResult = await integrationsApi.searchJiraContext({
+  const contextResult = await skillsApi.searchJiraContext({
     query: userInput,
     canvasId: currentCanvasId,
     topK: 5,
@@ -339,7 +339,7 @@ const generateProblemContent = async () => {
 
 ---
 
-## Enhanced AI Template Integration
+## Enhanced AI Template Skill
 
 Modify the template system to automatically include Jira context:
 
@@ -506,11 +506,11 @@ class Canvas:
 
 ```python
 # Test indexing
-POST /api/v1/integrations/jira/index/5
+POST /api/v1/skills/jira/index/5
 → {"indexed": 12, "status": "success"}
 
 # Test search
-POST /api/v1/integrations/jira/search-context
+POST /api/v1/skills/jira/search-context
 {
   "query": "authentication slow",
   "canvas_id": 5,
@@ -538,7 +538,7 @@ GET /api/v1/tasks?linked_node_id=42
 
 1. **Implement Backend Service** ✅ (Done - `jira_context_service.py`)
 2. **Add API Endpoints** (Add to `endpoints/jira.py`)
-3. **Frontend Integration** (Import dialog + Node editor)
+3. **Frontend Skill** (Import dialog + Node editor)
 4. **Template System Enhancement** (Auto-inject context)
 5. **Testing** (Index real Jira data, verify search quality)
 

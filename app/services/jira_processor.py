@@ -19,7 +19,7 @@ from app.services.input_processor import (
 )
 from app.models.task import Task, TaskStatus, TaskPriority, TaskSource
 from app.models.project import Project
-from app.services.jira import jira_service, jira_integration_service, JiraError
+from app.services.jira import jira_service, jira_skill_service, JiraError
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +267,7 @@ class JiraBulkImportJob(Job):
             )
 
         try:
-            access_token = await jira_integration_service.get_or_refresh_token(
+            access_token = await jira_skill_service.get_or_refresh_token(
                 context.session, context.integration
             )
 
@@ -374,7 +374,7 @@ class PushTaskToJiraJob(Job):
             )
 
         try:
-            access_token = await jira_integration_service.get_or_refresh_token(
+            access_token = await jira_skill_service.get_or_refresh_token(
                 context.session, context.integration
             )
 

@@ -1,10 +1,10 @@
-# External Integrations
+# External Skills
 
-Merlin supports integrations with external services for document syncing, communication, and collaboration.
+Merlin supports skills with external services for document syncing, communication, and collaboration.
 
-## Available Integrations
+## Available Skills
 
-| Integration | Status | Documentation |
+| Skill | Status | Documentation |
 |-------------|--------|---------------|
 | [Confluence](./CONFLUENCE_INTEGRATION.md) | Implemented | Sync documents with Atlassian Confluence |
 | [Slack](./SLACK_INTEGRATION.md) | Implemented | Connect to Slack for notifications and sharing |
@@ -14,13 +14,13 @@ Merlin supports integrations with external services for document syncing, commun
 
 ## Architecture
 
-All integrations follow the same backend-first architecture:
+All skills follow the same backend-first architecture:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Frontend                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │ Integration  │  │   Connect    │  │    Sync      │          │
+│  │ Skill  │  │   Connect    │  │    Sync      │          │
 │  │   Settings   │  │   Dialog     │  │   Status     │          │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │
 └─────────┼─────────────────┼─────────────────┼───────────────────┘
@@ -29,7 +29,7 @@ All integrations follow the same backend-first architecture:
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Backend API Layer                             │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │              /api/v1/integrations/                        │   │
+│  │              /api/v1/skills/                        │   │
 │  │  - OAuth flows                                            │   │
 │  │  - Token management                                       │   │
 │  │  - API proxying                                           │   │
@@ -48,28 +48,28 @@ All integrations follow the same backend-first architecture:
 
 ## Common Endpoints
 
-All integrations share these base endpoints:
+All skills share these base endpoints:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/integrations/providers` | List available providers |
-| `GET` | `/integrations/` | List connected integrations |
-| `GET` | `/integrations/{provider}` | Get integration details |
-| `DELETE` | `/integrations/{provider}` | Disconnect integration |
-| `GET` | `/integrations/{provider}/connect` | Start OAuth flow |
-| `GET` | `/integrations/{provider}/callback` | OAuth callback |
+| `GET` | `/skills/providers` | List available providers |
+| `GET` | `/skills/` | List connected skills |
+| `GET` | `/skills/{provider}` | Get skill details |
+| `DELETE` | `/skills/{provider}` | Disconnect skill |
+| `GET` | `/skills/{provider}/connect` | Start OAuth flow |
+| `GET` | `/skills/{provider}/callback` | OAuth callback |
 
 ## Database Models
 
-### Integration
+### Skill
 
 Organization-level connection to an external service:
 
 ```python
-class Integration:
+class Skill:
     id: int
     organization_id: int
-    provider: IntegrationProvider  # confluence, slack, notion, etc.
+    provider: SkillProvider  # confluence, slack, notion, etc.
     access_token: str              # Encrypted OAuth token
     refresh_token: str             # For token refresh
     token_expires_at: datetime
@@ -80,14 +80,14 @@ class Integration:
     updated_at: datetime
 ```
 
-### SpaceIntegration
+### SpaceSkill
 
 Links a Merlin space to an external space:
 
 ```python
-class SpaceIntegration:
+class SpaceSkill:
     id: int
-    integration_id: int
+    skill_id: int
     space_id: str
     external_space_key: str
     external_space_id: str
@@ -107,7 +107,7 @@ Tracks sync status for individual pages:
 ```python
 class PageSync:
     id: int
-    space_integration_id: int
+    space_skill_id: int
     page_id: str
     external_page_id: str
     external_page_url: str
@@ -126,13 +126,13 @@ Add to `.env`:
 # Confluence
 CONFLUENCE_CLIENT_ID=...
 CONFLUENCE_CLIENT_SECRET=...
-CONFLUENCE_REDIRECT_URI=http://localhost:8000/api/v1/integrations/confluence/callback
+CONFLUENCE_REDIRECT_URI=http://localhost:8000/api/v1/skills/confluence/callback
 
 # Slack
 SLACK_CLIENT_ID=...
 SLACK_CLIENT_SECRET=...
 SLACK_SIGNING_SECRET=...
-SLACK_REDIRECT_URI=http://localhost:8000/api/v1/integrations/slack/callback
+SLACK_REDIRECT_URI=http://localhost:8000/api/v1/skills/slack/callback
 ```
 
 ## Security
@@ -141,15 +141,15 @@ SLACK_REDIRECT_URI=http://localhost:8000/api/v1/integrations/slack/callback
 - **Encryption** - Use Fernet encryption for tokens at rest in production
 - **CSRF** - OAuth state parameter prevents cross-site request forgery
 - **Refresh** - Tokens are automatically refreshed when expired
-- **Scopes** - Minimal scopes requested for each integration
+- **Scopes** - Minimal scopes requested for each skill
 
-## Adding New Integrations
+## Adding New Skills
 
-1. Add provider to `IntegrationProvider` enum in `models/integration.py`
+1. Add provider to `SkillProvider` enum in `models/skill.py`
 2. Add config settings in `core/config.py`
 3. Create service class in `services/{provider}.py`
-4. Add schemas in `schemas/integration.py`
-5. Add endpoints in `api/v1/endpoints/integrations.py`
+4. Add schemas in `schemas/skill.py`
+5. Add endpoints in `api/v1/endpoints/skills.py`
 6. Update `list_providers` endpoint
 7. Create documentation in `{PROVIDER}_INTEGRATION.md`
 8. Run migrations
@@ -157,10 +157,10 @@ SLACK_REDIRECT_URI=http://localhost:8000/api/v1/integrations/slack/callback
 ## Testing
 
 ```bash
-# Run integration tests
-pytest tests/test_integrations.py -v
+# Run skill tests
+pytest tests/test_skills.py -v
 
 # Test OAuth flow manually
-curl http://localhost:8000/api/v1/integrations/confluence/connect
+curl http://localhost:8000/api/v1/skills/confluence/connect
 # Follow redirect, authorize, check callback
 ```

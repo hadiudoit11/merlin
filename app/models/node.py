@@ -8,7 +8,7 @@ from app.core.database import Base
 
 class NodeType(str, enum.Enum):
     DOC = "doc"
-    INTEGRATION = "integration"
+    SKILL = "skill"
     WEBHOOK = "webhook"
     API = "api"
     MCP = "mcp"

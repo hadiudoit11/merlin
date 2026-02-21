@@ -9,12 +9,12 @@ from app.models.organization import (
     OrganizationRole,
     InvitationStatus,
 )
-from app.models.integration import (
-    Integration,
-    SpaceIntegration,
+from app.models.skill import (
+    Skill,
+    SpaceSkill,
     PageSync,
     MeetingImport,
-    IntegrationProvider,
+    SkillProvider,
     SyncDirection,
     SyncStatus,
 )
@@ -79,11 +79,11 @@ __all__ = [
     "OrganizationInvitation",
     "OrganizationRole",
     "InvitationStatus",
-    "Integration",
-    "SpaceIntegration",
+    "Skill",
+    "SpaceSkill",
     "PageSync",
     "MeetingImport",
-    "IntegrationProvider",
+    "SkillProvider",
     "SyncDirection",
     "SyncStatus",
     "NodeTemplateContext",

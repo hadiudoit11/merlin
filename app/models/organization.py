@@ -60,7 +60,7 @@ class Organization(Base):
     require_sso_for_domain = Column(Boolean, default=False)  # Force SSO for domain users
     auto_join_domain = Column(Boolean, default=True)  # Auto-add users with matching domain
 
-    # Integration settings (JSON for flexibility)
+    # Skill settings (JSON for flexibility)
     # Structure: {
     #   "allowed_integrations": ["zoom", "jira", "slack"],  # Empty = all allowed
     #   "require_admin_approval": true,  # Members need admin approval to connect
@@ -69,7 +69,7 @@ class Organization(Base):
     #     "zoom": {"auto_import_recordings": true}
     #   }
     # }
-    integration_settings = Column(JSON, default=dict)
+    skill_settings = Column(JSON, default=dict)
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -81,27 +81,27 @@ class Organization(Base):
     invitations = relationship("OrganizationInvitation", back_populates="organization", cascade="all, delete-orphan")
     canvases = relationship("Canvas", back_populates="organization")
 
-    def is_integration_allowed(self, provider: str) -> bool:
-        """Check if a specific integration is allowed for this org."""
-        if not self.integration_settings:
+    def is_skill_allowed(self, provider: str) -> bool:
+        """Check if a specific skill is allowed for this org."""
+        if not self.skill_settings:
             return True  # All allowed by default
-        allowed = self.integration_settings.get("allowed_integrations", [])
+        allowed = self.skill_settings.get("allowed_integrations", [])
         if not allowed:  # Empty list = all allowed
             return True
         return provider.lower() in [p.lower() for p in allowed]
 
-    def get_integration_config(self, provider: str) -> dict:
-        """Get pre-configured settings for an integration."""
-        if not self.integration_settings:
+    def get_skill_config(self, provider: str) -> dict:
+        """Get pre-configured settings for a skill."""
+        if not self.skill_settings:
             return {}
-        preconfigured = self.integration_settings.get("preconfigured", {})
+        preconfigured = self.skill_settings.get("preconfigured", {})
         return preconfigured.get(provider.lower(), {})
 
-    def requires_admin_for_integrations(self) -> bool:
-        """Check if admin approval is needed to connect integrations."""
-        if not self.integration_settings:
+    def requires_admin_for_skills(self) -> bool:
+        """Check if admin approval is needed to connect skills."""
+        if not self.skill_settings:
             return False
-        return self.integration_settings.get("require_admin_approval", False)
+        return self.skill_settings.get("require_admin_approval", False)
 
 
 class OrganizationMember(Base):

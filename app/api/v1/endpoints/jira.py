@@ -16,8 +16,8 @@ from app.core.config import settings
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User
 from app.models.task import InputEvent, Task
-from app.models.integration import Integration, IntegrationProvider
-from app.services.jira import jira_service, jira_integration_service, JiraError
+from app.models.skill import Skill, SkillProvider
+from app.services.jira import jira_service, jira_skill_service, JiraError
 from app.services.jira_processor import (
     create_jira_webhook_pipeline,
     create_jira_import_pipeline,
@@ -145,7 +145,7 @@ async def process_jira_webhook_event(event_id: int, org_id: int, user_id: int):
                 return
 
             # Get integration
-            integration = await jira_integration_service.get_integration(session, org_id)
+            integration = await jira_skill_service.get_integration(session, org_id)
 
             # Build context
             payload = input_event.payload or {}
@@ -271,7 +271,7 @@ async def jira_oauth_callback(
 
         # Create/update integration with the specified scope
         scope = state_data.get("scope", "individual")
-        await jira_integration_service.create_integration(
+        await jira_skill_service.create_integration(
             session,
             user_id=state_data["user_id"],
             tokens=tokens,
@@ -284,13 +284,13 @@ async def jira_oauth_callback(
         # Redirect to frontend success page
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/integrations?jira=connected&scope={scope}"
+            url=f"{frontend_url}/skills?jira=connected&scope={scope}"
         )
 
     except JiraError as e:
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/integrations?jira=error&message={str(e)}"
+            url=f"{frontend_url}/skills?jira=error&message={str(e)}"
         )
 
 
@@ -309,7 +309,7 @@ async def get_jira_status(
     org_id = await get_user_org_id(session, current_user.id)
 
     # Get detailed status (works for both individual and org members)
-    connection_status = await jira_integration_service.get_connection_status(
+    connection_status = await jira_skill_service.get_connection_status(
         session, user_id=current_user.id, organization_id=org_id
     )
 
@@ -328,7 +328,7 @@ async def get_jira_status(
         individual_info = JiraConnectionInfo(**connection_status["individual"])
 
     # Get active integration for legacy fields
-    active_integration = await jira_integration_service.get_integration(
+    active_integration = await jira_skill_service.get_integration(
         session, organization_id=org_id, user_id=current_user.id
     )
 
@@ -371,7 +371,7 @@ async def disconnect_jira(
             detail=f"'{scope}' scope requires organization membership"
         )
 
-    disconnected = await jira_integration_service.disconnect(
+    disconnected = await jira_skill_service.disconnect(
         session,
         user_id=current_user.id,
         organization_id=org_id,
@@ -409,7 +409,7 @@ async def import_from_jira(
     org_id = await get_user_org_id(session, current_user.id)
 
     # Use fallback chain: individual/personal → org
-    integration = await jira_integration_service.get_integration(
+    integration = await jira_skill_service.get_integration(
         session, organization_id=org_id, user_id=current_user.id
     )
     if not integration:
@@ -476,7 +476,7 @@ async def push_task_to_jira(
     org_id = await get_user_org_id(session, current_user.id)
 
     # Use fallback chain: individual/personal → org
-    integration = await jira_integration_service.get_integration(
+    integration = await jira_skill_service.get_integration(
         session, organization_id=org_id, user_id=current_user.id
     )
     if not integration:
@@ -609,31 +609,31 @@ async def jira_webhook(
 
     # Try to find the organization from issue's project
     # This is tricky - we need to match by cloud_id or project key
-    # For now, we'll look at all Jira integrations
+    # For now, we'll look at all Jira skills
 
     result = await session.execute(
-        select(Integration).where(
-            Integration.provider == IntegrationProvider.JIRA,
-            Integration.status != "disconnected",
+        select(Skill).where(
+            Skill.provider == SkillProvider.JIRA,
+            Skill.status != "disconnected",
         )
     )
-    integrations = list(result.scalars().all())
+    skills = list(result.scalars().all())
 
-    if not integrations:
+    if not skills:
         return WebhookResponse(
             status="ignored",
-            message="No Jira integrations configured"
+            message="No Jira skills configured"
         )
 
-    # Use the first matching integration
+    # Use the first matching skill
     # In production, you'd match by cloud_id from the webhook
-    integration = integrations[0]
-    org_id = integration.organization_id
-    user_id = integration.connected_by_id
+    skill = skills[0]
+    org_id = skill.organization_id
+    user_id = skill.connected_by_id
 
     # Create InputEvent record
     input_event = InputEvent(
-        integration_id=integration.id,
+        skill_id=skill.id,
         source_type="jira",
         event_type=webhook_event,
         external_id=issue_key,

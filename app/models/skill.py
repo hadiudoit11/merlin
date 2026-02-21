@@ -1,7 +1,7 @@
 """
-Integration models for external service connections.
+Skill models for external service connections.
 
-Supports OAuth-based integrations like Confluence, Notion, etc.
+Supports OAuth-based skills like Confluence, Notion, etc.
 Tokens are encrypted at rest using Fernet symmetric encryption.
 """
 
@@ -13,8 +13,8 @@ import enum
 from app.core.database import Base
 
 
-class IntegrationProvider(str, enum.Enum):
-    """Supported integration providers."""
+class SkillProvider(str, enum.Enum):
+    """Supported skill providers."""
     CONFLUENCE = "confluence"
     SLACK = "slack"
     NOTION = "notion"
@@ -40,31 +40,31 @@ class SyncStatus(str, enum.Enum):
     DISCONNECTED = "disconnected"
 
 
-class Integration(Base):
+class Skill(Base):
     """
-    Integration connection supporting individual, organization, and hybrid user-level connections.
+    Skill connection supporting individual, organization, and hybrid user-level connections.
 
     Three modes:
     - Individual user: organization_id is NULL, user_id is SET (personal account, no org)
     - Organization-level: organization_id is SET, user_id is NULL (shared by all org members)
     - Personal override: organization_id is SET, user_id is SET (user's personal within org context)
 
-    Fallback chain: Personal override → Org connection → Individual → Not connected
+    Fallback chain: Personal override -> Org connection -> Individual -> Not connected
     """
-    __tablename__ = "integrations"
+    __tablename__ = "skills"
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # Organization this integration belongs to (NULL for individual users)
+    # Organization this skill belongs to (NULL for individual users)
     organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
 
     # User for personal/individual connections
-    # - If org_id is NULL: individual user's integration (no org membership)
+    # - If org_id is NULL: individual user's skill (no org membership)
     # - If org_id is SET: personal override within org context
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
 
     # Provider info
-    provider = Column(Enum(IntegrationProvider), nullable=False)
+    provider = Column(Enum(SkillProvider), nullable=False)
 
     # OAuth tokens (encrypted in production)
     access_token = Column(Text, nullable=True)
@@ -76,7 +76,7 @@ class Integration(Base):
     provider_data = Column(JSON, default=dict)
 
     # Pre-configured settings from org admin
-    # Merged with org-level integration_settings when connecting
+    # Merged with org-level skill_settings when connecting
     config = Column(JSON, default=dict)
 
     # Whether this uses org-level credentials (vs user OAuth)
@@ -86,7 +86,7 @@ class Integration(Base):
     status = Column(Enum(SyncStatus), default=SyncStatus.IDLE)
     last_error = Column(Text, nullable=True)
 
-    # Who connected this integration
+    # Who connected this skill
     connected_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     # Timestamps
@@ -94,24 +94,24 @@ class Integration(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    organization = relationship("Organization", backref="integrations")
-    user = relationship("User", foreign_keys=[user_id], backref="personal_integrations")
+    organization = relationship("Organization", backref="skills")
+    user = relationship("User", foreign_keys=[user_id], backref="personal_skills")
     connected_by = relationship("User", foreign_keys=[connected_by_id])
-    space_integrations = relationship("SpaceIntegration", back_populates="integration", cascade="all, delete-orphan")
+    space_skills = relationship("SpaceSkill", back_populates="skill", cascade="all, delete-orphan")
 
     @property
     def is_individual(self) -> bool:
-        """Check if this is an individual user's integration (no org)."""
+        """Check if this is an individual user's skill (no org)."""
         return self.organization_id is None and self.user_id is not None
 
     @property
     def is_personal(self) -> bool:
-        """Check if this is a user-level (personal) integration within an org."""
+        """Check if this is a user-level (personal) skill within an org."""
         return self.organization_id is not None and self.user_id is not None
 
     @property
     def is_org_level(self) -> bool:
-        """Check if this is an org-level shared integration."""
+        """Check if this is an org-level shared skill."""
         return self.organization_id is not None and self.user_id is None
 
     @property
@@ -133,22 +133,22 @@ class Integration(Base):
 
     @property
     def is_connected(self) -> bool:
-        """Check if integration has valid credentials."""
+        """Check if skill has valid credentials."""
         return self.access_token is not None and self.status != SyncStatus.DISCONNECTED
 
 
-class SpaceIntegration(Base):
+class SpaceSkill(Base):
     """
     Links a Merlin document space to an external space (e.g., Confluence space).
 
     Allows per-space sync configuration and tracking.
     """
-    __tablename__ = "space_integrations"
+    __tablename__ = "space_skills"
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # Link to organization integration
-    integration_id = Column(Integer, ForeignKey("integrations.id", ondelete="CASCADE"), nullable=False)
+    # Link to organization skill
+    skill_id = Column(Integer, ForeignKey("skills.id", ondelete="CASCADE"), nullable=False)
 
     # Merlin space (could be a canvas or doc space)
     # For now using string ID to be flexible
@@ -179,8 +179,8 @@ class SpaceIntegration(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    integration = relationship("Integration", back_populates="space_integrations")
-    page_syncs = relationship("PageSync", back_populates="space_integration", cascade="all, delete-orphan")
+    skill = relationship("Skill", back_populates="space_skills")
+    page_syncs = relationship("PageSync", back_populates="space_skill", cascade="all, delete-orphan")
 
 
 class PageSync(Base):
@@ -191,8 +191,8 @@ class PageSync(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # Link to space integration
-    space_integration_id = Column(Integer, ForeignKey("space_integrations.id", ondelete="CASCADE"), nullable=False)
+    # Link to space skill
+    space_skill_id = Column(Integer, ForeignKey("space_skills.id", ondelete="CASCADE"), nullable=False)
 
     # Merlin page
     page_id = Column(String(255), nullable=False, index=True)
@@ -219,7 +219,7 @@ class PageSync(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    space_integration = relationship("SpaceIntegration", back_populates="page_syncs")
+    space_skill = relationship("SpaceSkill", back_populates="page_syncs")
 
 
 class MeetingImport(Base):
@@ -232,8 +232,8 @@ class MeetingImport(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # Link to integration
-    integration_id = Column(Integer, ForeignKey("integrations.id", ondelete="CASCADE"), nullable=False)
+    # Link to skill
+    skill_id = Column(Integer, ForeignKey("skills.id", ondelete="CASCADE"), nullable=False)
 
     # Link to canvas where notes are created
     canvas_id = Column(Integer, ForeignKey("canvases.id", ondelete="SET NULL"), nullable=True)
@@ -274,5 +274,5 @@ class MeetingImport(Base):
     processed_at = Column(DateTime, nullable=True)
 
     # Relationships
-    integration = relationship("Integration", backref="meeting_imports")
+    skill = relationship("Skill", backref="meeting_imports")
     canvas = relationship("Canvas", backref="meeting_imports")

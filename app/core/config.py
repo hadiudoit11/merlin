@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     # Confluence Integration (Atlassian OAuth 2.0)
     CONFLUENCE_CLIENT_ID: str = ""
     CONFLUENCE_CLIENT_SECRET: str = ""
-    CONFLUENCE_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/confluence/callback"
+    CONFLUENCE_REDIRECT_URI: str = "http://localhost:8000/api/v1/skills/confluence/callback"
     CONFLUENCE_SCOPES: str = "read:confluence-content.all write:confluence-content read:confluence-space.summary offline_access"
 
     @computed_field
@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     SLACK_CLIENT_ID: str = ""
     SLACK_CLIENT_SECRET: str = ""
     SLACK_SIGNING_SECRET: str = ""
-    SLACK_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/slack/callback"
+    SLACK_REDIRECT_URI: str = "http://localhost:8000/api/v1/skills/slack/callback"
     SLACK_SCOPES: str = "channels:read,channels:history,chat:write,users:read,team:read,files:read"
 
     @computed_field
@@ -101,7 +101,7 @@ class Settings(BaseSettings):
     # Zoom Integration (OAuth 2.0)
     ZOOM_CLIENT_ID: str = ""
     ZOOM_CLIENT_SECRET: str = ""
-    ZOOM_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/zoom/callback"
+    ZOOM_REDIRECT_URI: str = "http://localhost:8000/api/v1/skills/zoom/callback"
     ZOOM_SCOPES: str = "cloud_recording:read:list_user_recordings cloud_recording:read:recording_token meeting:read:list_meetings meeting:read:meeting user:read:user"
     ZOOM_WEBHOOK_SECRET_TOKEN: str = ""  # For verifying webhook signatures
 
@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     # Jira Integration (Atlassian OAuth 2.0)
     JIRA_CLIENT_ID: str = ""
     JIRA_CLIENT_SECRET: str = ""
-    JIRA_REDIRECT_URI: str = "http://localhost:8000/api/v1/integrations/jira/callback"
+    JIRA_REDIRECT_URI: str = "http://localhost:8000/api/v1/skills/jira/callback"
     JIRA_SCOPES: str = "read:jira-work read:jira-user write:jira-work offline_access"
     JIRA_WEBHOOK_SECRET: str = ""  # For webhook signature verification
 

@@ -14,7 +14,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.models.integration import MeetingImport
+from app.models.skill import MeetingImport
 from app.models.node import Node
 from app.models.canvas import Canvas
 from app.services.settings_service import SettingsService

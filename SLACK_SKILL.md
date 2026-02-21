@@ -1,6 +1,6 @@
-# Slack Integration
+# Slack Skill
 
-Backend integration for connecting Merlin to Slack workspaces.
+Backend skill for connecting Merlin to Slack workspaces.
 
 ## Features
 
@@ -39,37 +39,37 @@ Frontend                    Backend                       Slack
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/integrations/slack/connect` | Initiate OAuth flow |
-| `GET` | `/integrations/slack/callback` | OAuth callback handler |
+| `GET` | `/skills/slack/connect` | Initiate OAuth flow |
+| `GET` | `/skills/slack/callback` | OAuth callback handler |
 
 ### Team/Workspace
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/integrations/slack/team` | Get workspace info |
+| `GET` | `/skills/slack/team` | Get workspace info |
 
 ### Channels
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/integrations/slack/channels` | List all channels |
-| `GET` | `/integrations/slack/channels/{id}` | Get channel details |
-| `GET` | `/integrations/slack/channels/{id}/messages` | Get channel history |
-| `GET` | `/integrations/slack/channels/{id}/threads/{ts}` | Get thread replies |
-| `POST` | `/integrations/slack/channels/{id}/messages` | Post a message |
+| `GET` | `/skills/slack/channels` | List all channels |
+| `GET` | `/skills/slack/channels/{id}` | Get channel details |
+| `GET` | `/skills/slack/channels/{id}/messages` | Get channel history |
+| `GET` | `/skills/slack/channels/{id}/threads/{ts}` | Get thread replies |
+| `POST` | `/skills/slack/channels/{id}/messages` | Post a message |
 
 ### Users
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/integrations/slack/users` | List workspace users |
-| `GET` | `/integrations/slack/users/{id}` | Get user details |
+| `GET` | `/skills/slack/users` | List workspace users |
+| `GET` | `/skills/slack/users/{id}` | Get user details |
 
 ### Search
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/integrations/slack/search` | Search messages |
+| `POST` | `/skills/slack/search` | Search messages |
 
 ## Configuration
 
@@ -80,7 +80,7 @@ Add to `.env`:
 SLACK_CLIENT_ID=your-client-id
 SLACK_CLIENT_SECRET=your-client-secret
 SLACK_SIGNING_SECRET=your-signing-secret
-SLACK_REDIRECT_URI=http://localhost:8000/api/v1/integrations/slack/callback
+SLACK_REDIRECT_URI=http://localhost:8000/api/v1/skills/slack/callback
 SLACK_SCOPES=channels:read,channels:history,chat:write,users:read,team:read,files:read
 ```
 
@@ -92,7 +92,7 @@ SLACK_SCOPES=channels:read,channels:history,chat:write,users:read,team:read,file
 2. Click "Create New App" → "From scratch"
 3. Name it (e.g., "Merlin") and select your workspace
 4. Go to "OAuth & Permissions"
-5. Add redirect URL: `http://localhost:8000/api/v1/integrations/slack/callback`
+5. Add redirect URL: `http://localhost:8000/api/v1/skills/slack/callback`
 6. Add Bot Token Scopes:
    - `channels:read` - View basic channel info
    - `channels:history` - View messages in public channels
@@ -112,7 +112,7 @@ SLACK_SCOPES=channels:read,channels:history,chat:write,users:read,team:read,file
 ```bash
 cd Merlin
 source venv/bin/activate
-alembic revision --autogenerate -m "add slack integration"
+alembic revision --autogenerate -m "add slack skill"
 alembic upgrade head
 ```
 
@@ -127,7 +127,7 @@ uvicorn app.main:app --reload
 ### List Channels
 
 ```bash
-curl -X GET "http://localhost:8000/api/v1/integrations/slack/channels" \
+curl -X GET "http://localhost:8000/api/v1/skills/slack/channels" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -150,7 +150,7 @@ Response:
 ### Get Channel Messages
 
 ```bash
-curl -X GET "http://localhost:8000/api/v1/integrations/slack/channels/C01234567/messages?limit=20" \
+curl -X GET "http://localhost:8000/api/v1/skills/slack/channels/C01234567/messages?limit=20" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -173,7 +173,7 @@ Response:
 ### Post a Message
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/integrations/slack/channels/C01234567/messages" \
+curl -X POST "http://localhost:8000/api/v1/skills/slack/channels/C01234567/messages" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"text": "Hello from Merlin!"}'
@@ -182,7 +182,7 @@ curl -X POST "http://localhost:8000/api/v1/integrations/slack/channels/C01234567
 ### Search Messages
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/integrations/slack/search" \
+curl -X POST "http://localhost:8000/api/v1/skills/slack/search" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"query": "project update", "count": 10}'

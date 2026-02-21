@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "typequest-canvas": {
+      "command": "python3",
+      "args": ["mcp_server.py"],
+      "cwd": "/home/hadi-rashid/merlin",
+      "env": {
+        "MCP_USER_ID": "1",
+        "MCP_ENABLE_AUDIT": "true"
+      }
+    },
+    "typequest-skills": {
+      "command": "python3",
+      "args": ["skills_mcp_server.py"],
+      "cwd": "/home/hadi-rashid/merlin",
+      "env": {
+        "MCP_USER_ID": "1",
+        "MCP_ENABLE_AUDIT": "true"
+      }
+    }
+  }
+}

@@ -25,7 +25,7 @@ from sqlalchemy import select
 from app.models.task import Task, InputEvent, TaskStatus, TaskPriority, TaskSource
 from app.models.node import Node
 from app.models.canvas import Canvas
-from app.models.integration import Integration, MeetingImport
+from app.models.skill import Skill, MeetingImport
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class JobContext:
     user_id: int
     organization_id: Optional[int]
     input_event: InputEvent
-    integration: Optional[Integration] = None
+    integration: Optional[Skill] = None
 
     # Data passed between jobs
     raw_content: str = ""

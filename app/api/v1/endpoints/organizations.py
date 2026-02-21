@@ -638,36 +638,36 @@ async def accept_invitation(
     )
 
 
-# ============ Integration Settings ============
+# ============ Skill Settings ============
 
 from pydantic import BaseModel
 from typing import Dict, Any
-from app.models.integration import Integration, IntegrationProvider
+from app.models.skill import Skill, SkillProvider
 
 
-class IntegrationSettingsUpdate(BaseModel):
-    """Schema for updating organization integration settings."""
+class SkillSettingsUpdate(BaseModel):
+    """Schema for updating organization skill settings."""
     allowed_integrations: Optional[List[str]] = None  # Empty = all allowed
     require_admin_approval: Optional[bool] = None
     preconfigured: Optional[Dict[str, Dict[str, Any]]] = None
 
 
-class IntegrationSettingsResponse(BaseModel):
-    """Response schema for integration settings."""
+class SkillSettingsResponse(BaseModel):
+    """Response schema for skill settings."""
     allowed_integrations: List[str]
     require_admin_approval: bool
     preconfigured: Dict[str, Dict[str, Any]]
     available_providers: List[str]
-    connected_integrations: List[str]
+    connected_skills: List[str]
 
 
-@router.get("/{organization_id}/integrations/settings", response_model=IntegrationSettingsResponse)
-async def get_integration_settings(
+@router.get("/{organization_id}/skills/settings", response_model=SkillSettingsResponse)
+async def get_skill_settings(
     organization_id: int,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
-) -> IntegrationSettingsResponse:
-    """Get organization integration settings. Requires admin role."""
+) -> SkillSettingsResponse:
+    """Get organization skill settings. Requires admin role."""
     await require_org_permission(session, organization_id, current_user.id, ModelRole.ADMIN)
 
     result = await session.execute(
@@ -678,33 +678,33 @@ async def get_integration_settings(
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    settings = org.integration_settings or {}
+    settings = org.skill_settings or {}
 
-    # Get connected integrations
+    # Get connected skills
     int_result = await session.execute(
-        select(Integration.provider).where(
-            Integration.organization_id == organization_id
+        select(Skill.provider).where(
+            Skill.organization_id == organization_id
         )
     )
     connected = [str(p) for p in int_result.scalars().all()]
 
-    return IntegrationSettingsResponse(
+    return SkillSettingsResponse(
         allowed_integrations=settings.get("allowed_integrations", []),
         require_admin_approval=settings.get("require_admin_approval", False),
         preconfigured=settings.get("preconfigured", {}),
-        available_providers=[p.value for p in IntegrationProvider],
-        connected_integrations=connected,
+        available_providers=[p.value for p in SkillProvider],
+        connected_skills=connected,
     )
 
 
-@router.put("/{organization_id}/integrations/settings", response_model=IntegrationSettingsResponse)
-async def update_integration_settings(
+@router.put("/{organization_id}/skills/settings", response_model=SkillSettingsResponse)
+async def update_skill_settings(
     organization_id: int,
-    data: IntegrationSettingsUpdate,
+    data: SkillSettingsUpdate,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
-) -> IntegrationSettingsResponse:
-    """Update organization integration settings. Requires owner role."""
+) -> SkillSettingsResponse:
+    """Update organization skill settings. Requires owner role."""
     await require_org_permission(session, organization_id, current_user.id, ModelRole.OWNER)
 
     result = await session.execute(
@@ -715,18 +715,18 @@ async def update_integration_settings(
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    # Validate allowed integrations
-    valid_providers = [p.value for p in IntegrationProvider]
+    # Validate allowed providers
+    valid_providers = [p.value for p in SkillProvider]
     if data.allowed_integrations is not None:
         invalid = [p for p in data.allowed_integrations if p.lower() not in valid_providers]
         if invalid:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid integration providers: {invalid}. Valid: {valid_providers}"
+                detail=f"Invalid skill providers: {invalid}. Valid: {valid_providers}"
             )
 
     # Update settings
-    current_settings = org.integration_settings or {}
+    current_settings = org.skill_settings or {}
 
     if data.allowed_integrations is not None:
         current_settings["allowed_integrations"] = [p.lower() for p in data.allowed_integrations]
@@ -735,35 +735,35 @@ async def update_integration_settings(
     if data.preconfigured is not None:
         current_settings["preconfigured"] = data.preconfigured
 
-    org.integration_settings = current_settings
+    org.skill_settings = current_settings
     await session.commit()
     await session.refresh(org)
 
-    # Get connected integrations
+    # Get connected skills
     int_result = await session.execute(
-        select(Integration.provider).where(
-            Integration.organization_id == organization_id
+        select(Skill.provider).where(
+            Skill.organization_id == organization_id
         )
     )
     connected = [str(p) for p in int_result.scalars().all()]
 
-    return IntegrationSettingsResponse(
+    return SkillSettingsResponse(
         allowed_integrations=current_settings.get("allowed_integrations", []),
         require_admin_approval=current_settings.get("require_admin_approval", False),
         preconfigured=current_settings.get("preconfigured", {}),
         available_providers=valid_providers,
-        connected_integrations=connected,
+        connected_skills=connected,
     )
 
 
-@router.get("/{organization_id}/integrations/allowed")
-async def check_integration_allowed(
+@router.get("/{organization_id}/skills/allowed")
+async def check_skill_allowed(
     organization_id: int,
     provider: str,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user)
 ) -> Dict[str, Any]:
-    """Check if a specific integration is allowed for the organization."""
+    """Check if a specific skill is allowed for the organization."""
     await require_org_permission(session, organization_id, current_user.id)
 
     result = await session.execute(
@@ -777,9 +777,9 @@ async def check_integration_allowed(
     # Get user's role
     role = await get_user_role(session, organization_id, current_user.id)
 
-    is_allowed = org.is_integration_allowed(provider)
-    requires_admin = org.requires_admin_for_integrations()
-    config = org.get_integration_config(provider)
+    is_allowed = org.is_skill_allowed(provider)
+    requires_admin = org.requires_admin_for_skills()
+    config = org.get_skill_config(provider)
 
     can_connect = is_allowed and (
         not requires_admin or role in [ModelRole.ADMIN, ModelRole.OWNER]

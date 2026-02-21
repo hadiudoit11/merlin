@@ -1,8 +1,8 @@
-# Complete Jira Integration - User & System Guide
+# Complete Jira Skill - User & System Guide
 
 ## Overview
 
-This is the **complete Jira integration system** with three key capabilities:
+This is the **complete Jira skill system** with three key capabilities:
 
 1. **🎯 Automatic Discovery** - AI-powered semantic search finds related Jira issues
 2. **✏️ Manual Management** - Full UI for customizing connections
@@ -141,11 +141,11 @@ Saves → Node now shows "🎫 4 linked issues"
 
 ### Location
 - **Component**: `/Merlin-fe/src/components/canvas/JiraConnectionsManager.tsx`
-- **Integration**: Add to canvas page layout
+- **Skill**: Add to canvas page layout
 
 ---
 
-## Part 3: MCP Protocol Integration
+## Part 3: MCP Protocol Skill
 
 ### What It Does
 Exposes Jira strategic context to **Claude Desktop** via MCP protocol. Claude can search for related Jira issues when helping you with canvas work.
@@ -291,18 +291,18 @@ The Jira tools will now be available to Claude.
 
 ---
 
-## Complete Integration Example
+## Complete Skill Example
 
 ### Scenario: PM Planning Authentication Work
 
 **Step 1: Import Jira Issues** (One-time)
 ```typescript
-// User goes to /integrations → Jira → Import Issues
+// User goes to /skills → Jira → Import Issues
 // Enters JQL: project = AUTH AND status != Done
 // Imports 23 issues
 
 // System automatically indexes them for search
-await integrationsApi.indexJiraIssuesForCanvas(canvasId);
+await skillsApi.indexJiraIssuesForCanvas(canvasId);
 ```
 
 **Step 2: Create Problem Node**
@@ -479,7 +479,7 @@ task_id | node_id | link_type
 - `DELETE /tasks/{task_id}/link/{node_id}` - Unlink task from node
 - `PUT /tasks/{task_id}` - Update task (including canvas_id)
 
-### Jira Integration (Existing)
+### Jira Skill (Existing)
 - `POST /jira/import` - Import issues from Jira
 - `GET /jira/status` - Connection status
 - `POST /jira/webhook` - Receive updates from Jira
@@ -497,7 +497,7 @@ task_id | node_id | link_type
 ### Frontend
 - [x] `StrategicContextPanel` component created
 - [x] `JiraConnectionsManager` component created
-- [x] API methods added to `integrations-api.ts`
+- [x] API methods added to `skills-api.ts`
 - [ ] Add panels to canvas page layout
 - [ ] Add "Manage Connections" buttons
 
@@ -519,7 +519,7 @@ task_id | node_id | link_type
 **Ready to integrate:**
 
 1. **Add Strategic Context Panel to canvas** (5 minutes)
-   - See `STRATEGIC_CONTEXT_INTEGRATION.md`
+   - See `STRATEGIC_CONTEXT_SKILL.md`
 
 2. **Add Connection Manager button** (2 minutes)
    - Add to canvas toolbar or node menu

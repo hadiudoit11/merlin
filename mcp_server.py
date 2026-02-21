@@ -41,7 +41,7 @@ from sqlalchemy.orm import selectinload
 from app.core.database import async_session_maker
 from app.models.template import NodeTemplateContext, TemplateScope, SYSTEM_DEFAULT_TEMPLATES
 from app.models.task import Task, TaskStatus, TaskPriority, TaskSource, InputEvent
-from app.models.integration import Integration, IntegrationProvider, MeetingImport
+from app.models.skill import Skill, SkillProvider, MeetingImport
 from app.models.node import Node
 from app.models.mcp import MCPAuditLog, MCPActionStatus
 from app.models.project import Project
@@ -256,7 +256,7 @@ async def list_tools() -> list[Tool]:
         # Jira Tools
         Tool(
             name="get_jira_status",
-            description="Check Jira integration connection status for an organization",
+            description="Check Jira skill connection status for an organization",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -302,7 +302,7 @@ async def list_tools() -> list[Tool]:
         # Zoom Tools
         Tool(
             name="get_zoom_status",
-            description="Check Zoom integration connection status for an organization",
+            description="Check Zoom skill connection status for an organization",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -348,7 +348,7 @@ async def list_tools() -> list[Tool]:
         # Input Event Tools
         Tool(
             name="list_input_events",
-            description="List webhook/integration events and their processing status",
+            description="List webhook/skill events and their processing status",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -692,7 +692,7 @@ async def handle_get_connection_rules(args: dict) -> list[TextContent]:
             "keyresult": {"can_connect_to": ["metric", "problem"]},
             "metric": {"can_connect_to": []},
             "problem": {"can_connect_to": ["doc"]},
-            "doc": {"can_connect_to": ["doc", "agent", "integration"]},
+            "doc": {"can_connect_to": ["doc", "agent", "skill"]},
         },
     }
     return [TextContent(type="text", text=json.dumps(rules, indent=2))]
@@ -937,12 +937,12 @@ async def handle_get_task_stats(args: dict) -> list[TextContent]:
 # ============ Jira Handlers ============
 
 async def handle_get_jira_status(args: dict) -> list[TextContent]:
-    """Get Jira integration status."""
+    """Get Jira skill status."""
     async with async_session_maker() as session:
         result = await session.execute(
-            select(Integration).where(
-                Integration.organization_id == args["organization_id"],
-                Integration.provider == IntegrationProvider.JIRA.value,
+            select(Skill).where(
+                Skill.organization_id == args["organization_id"],
+                Skill.provider == SkillProvider.JIRA.value,
             )
         )
         integration = result.scalar_one_or_none()
@@ -950,7 +950,7 @@ async def handle_get_jira_status(args: dict) -> list[TextContent]:
         if not integration:
             return [TextContent(type="text", text=json.dumps({
                 "connected": False,
-                "message": "No Jira integration found",
+                "message": "No Jira skill found",
             }, indent=2))]
 
         output = {
@@ -968,7 +968,7 @@ async def handle_import_jira_issues(args: dict) -> list[TextContent]:
     """Import Jira issues - returns instructions for now."""
     return [TextContent(type="text", text=json.dumps({
         "message": "To import Jira issues, use the API endpoint:",
-        "endpoint": "POST /api/v1/integrations/jira/import",
+        "endpoint": "POST /api/v1/skills/jira/import",
         "body": {
             "jql": args["jql"],
             "canvas_id": args.get("canvas_id"),
@@ -981,7 +981,7 @@ async def handle_push_task_to_jira(args: dict) -> list[TextContent]:
     """Push task to Jira - returns instructions."""
     return [TextContent(type="text", text=json.dumps({
         "message": "To push a task to Jira, use the API endpoint:",
-        "endpoint": "POST /api/v1/integrations/jira/push",
+        "endpoint": "POST /api/v1/skills/jira/push",
         "body": {
             "task_id": args["task_id"],
             "project_key": args["project_key"],
@@ -994,12 +994,12 @@ async def handle_push_task_to_jira(args: dict) -> list[TextContent]:
 # ============ Zoom Handlers ============
 
 async def handle_get_zoom_status(args: dict) -> list[TextContent]:
-    """Get Zoom integration status."""
+    """Get Zoom skill status."""
     async with async_session_maker() as session:
         result = await session.execute(
-            select(Integration).where(
-                Integration.organization_id == args["organization_id"],
-                Integration.provider == IntegrationProvider.ZOOM.value,
+            select(Skill).where(
+                Skill.organization_id == args["organization_id"],
+                Skill.provider == SkillProvider.ZOOM.value,
             )
         )
         integration = result.scalar_one_or_none()
@@ -1007,7 +1007,7 @@ async def handle_get_zoom_status(args: dict) -> list[TextContent]:
         if not integration:
             return [TextContent(type="text", text=json.dumps({
                 "connected": False,
-                "message": "No Zoom integration found",
+                "message": "No Zoom skill found",
             }, indent=2))]
 
         output = {
@@ -1023,7 +1023,7 @@ async def handle_list_zoom_recordings(args: dict) -> list[TextContent]:
     """List Zoom recordings - returns instructions."""
     return [TextContent(type="text", text=json.dumps({
         "message": "To list Zoom recordings, use the API endpoint:",
-        "endpoint": "GET /api/v1/integrations/zoom/recordings",
+        "endpoint": "GET /api/v1/skills/zoom/recordings",
         "params": {"days": args.get("days", 30)},
         "note": "This endpoint requires authentication and fetches from Zoom API",
     }, indent=2))]
@@ -1034,9 +1034,9 @@ async def handle_list_meeting_imports(args: dict) -> list[TextContent]:
     async with async_session_maker() as session:
         # Get integration first
         int_result = await session.execute(
-            select(Integration).where(
-                Integration.organization_id == args["organization_id"],
-                Integration.provider == IntegrationProvider.ZOOM.value,
+            select(Skill).where(
+                Skill.organization_id == args["organization_id"],
+                Skill.provider == SkillProvider.ZOOM.value,
             )
         )
         integration = int_result.scalar_one_or_none()
@@ -1044,11 +1044,11 @@ async def handle_list_meeting_imports(args: dict) -> list[TextContent]:
         if not integration:
             return [TextContent(type="text", text=json.dumps({
                 "meetings": [],
-                "message": "No Zoom integration found",
+                "message": "No Zoom skill found",
             }, indent=2))]
 
         query = select(MeetingImport).where(
-            MeetingImport.integration_id == integration.id
+            MeetingImport.skill_id == integration.id
         )
 
         if args.get("status"):

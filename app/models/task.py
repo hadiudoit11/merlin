@@ -5,7 +5,7 @@ Tasks can be extracted from:
 - Zoom meetings (via transcript processing)
 - Slack messages
 - Manual creation
-- Other integrations
+- Other skills
 
 Tasks can be linked to nodes on the canvas (e.g., related to a Key Result or Problem).
 """
@@ -178,10 +178,10 @@ class InputEvent(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # Source integration
-    integration_id = Column(
+    # Source skill
+    skill_id = Column(
         Integer,
-        ForeignKey("integrations.id", ondelete="CASCADE"),
+        ForeignKey("skills.id", ondelete="CASCADE"),
         nullable=True,
         index=True
     )
@@ -219,7 +219,7 @@ class InputEvent(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    integration = relationship("Integration", backref="input_events")
+    skill = relationship("Skill", backref="input_events")
     organization = relationship("Organization", backref="input_events")
 
     def __repr__(self):

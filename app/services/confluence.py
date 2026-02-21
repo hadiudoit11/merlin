@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
 from app.core.config import settings
-from app.schemas.integration import (
+from app.schemas.skill import (
     ConfluenceSpace,
     ConfluencePage,
     SyncResult,
@@ -458,6 +458,30 @@ class ConfluenceService:
             version=page.get("version", {}).get("number", 1),
             web_url=page.get("_links", {}).get("webui"),
         )
+
+    async def delete_page(self, page_id: str) -> bool:
+        """
+        Delete a Confluence page.
+
+        Args:
+            page_id: The page ID to delete
+
+        Returns:
+            True if deleted successfully
+        """
+        if not self.access_token or not self.cloud_id:
+            raise ValueError("Access token and cloud_id required")
+
+        client = await self._get_client()
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+
+        response = await client.delete(
+            f"{self.api_url}/pages/{page_id}",
+            headers=headers,
+        )
+        response.raise_for_status()
+
+        return True
 
     # ============ Content Conversion ============
 
