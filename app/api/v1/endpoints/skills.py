@@ -360,10 +360,10 @@ async def confluence_oauth_callback(
 
         await session.commit()
 
-        # Redirect back to frontend
+        # Redirect to frontend callback page (handles popup close + parent notification)
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/settings/skills?connected=confluence",
+            url=f"{frontend_url}/auth/callback?confluence=connected",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -371,7 +371,7 @@ async def confluence_oauth_callback(
         # Redirect with error
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/settings/skills?error=confluence_connect_failed",
+            url=f"{frontend_url}/auth/callback?confluence=error&message=Connection failed",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -877,10 +877,10 @@ async def slack_oauth_callback(
 
         await session.commit()
 
-        # Redirect back to frontend
+        # Redirect to frontend callback page (handles popup close + parent notification)
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/settings/skills?connected=slack",
+            url=f"{frontend_url}/auth/callback?slack=connected",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -888,7 +888,7 @@ async def slack_oauth_callback(
         # Redirect with error
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/settings/skills?error=slack_connect_failed",
+            url=f"{frontend_url}/auth/callback?slack=error&message=Connection failed",
             status_code=status.HTTP_302_FOUND,
         )
 
@@ -1279,3 +1279,225 @@ async def search_slack_messages(
         )
     finally:
         await service.close()
+
+
+# ============ Skill Prompts (Canvas-specific agent prompts) ============
+
+from app.models.skill import SkillPrompt
+from app.models.canvas import Canvas
+from app.schemas.skill import (
+    SkillPromptCreate,
+    SkillPromptUpdate,
+    SkillPromptResponse,
+    SkillPromptBrief,
+    SkillPromptGenerateRequest,
+    SkillPromptGenerateResponse,
+)
+
+
+@router.get("/prompts/canvas/{canvas_id}", response_model=List[SkillPromptBrief])
+async def list_skill_prompts_for_canvas(
+    canvas_id: int,
+    skill_name: Optional[str] = None,
+    is_active: Optional[bool] = True,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> List[SkillPromptBrief]:
+    """List all skill prompts for a canvas."""
+    # Verify user has access to canvas
+    canvas = await session.get(Canvas, canvas_id)
+    if not canvas:
+        raise HTTPException(status_code=404, detail="Canvas not found")
+
+    # Build query
+    query = select(SkillPrompt).where(SkillPrompt.canvas_id == canvas_id)
+
+    if skill_name:
+        query = query.where(SkillPrompt.skill_name == skill_name)
+    if is_active is not None:
+        query = query.where(SkillPrompt.is_active == is_active)
+
+    query = query.order_by(SkillPrompt.skill_name, SkillPrompt.action)
+
+    result = await session.execute(query)
+    prompts = result.scalars().all()
+
+    return [SkillPromptBrief.model_validate(p) for p in prompts]
+
+
+@router.get("/prompts/{prompt_id}", response_model=SkillPromptResponse)
+async def get_skill_prompt(
+    prompt_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> SkillPromptResponse:
+    """Get a specific skill prompt with full details and history."""
+    prompt = await session.get(SkillPrompt, prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Skill prompt not found")
+
+    return SkillPromptResponse.model_validate(prompt)
+
+
+@router.get("/prompts/canvas/{canvas_id}/resolve", response_model=Optional[SkillPromptResponse])
+async def resolve_skill_prompt(
+    canvas_id: int,
+    skill_name: str,
+    action: str = "*",
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> Optional[SkillPromptResponse]:
+    """
+    Resolve the active skill prompt for a canvas + skill + action.
+
+    Resolution order:
+    1. Exact match (canvas_id, skill_name, action)
+    2. Wildcard match (canvas_id, skill_name, '*')
+    3. None (no prompt configured)
+    """
+    # Try exact match first
+    query = select(SkillPrompt).where(
+        SkillPrompt.canvas_id == canvas_id,
+        SkillPrompt.skill_name == skill_name,
+        SkillPrompt.action == action,
+        SkillPrompt.is_active == True,
+    )
+    result = await session.execute(query)
+    prompt = result.scalar_one_or_none()
+
+    # If no exact match, try wildcard
+    if not prompt and action != "*":
+        query = select(SkillPrompt).where(
+            SkillPrompt.canvas_id == canvas_id,
+            SkillPrompt.skill_name == skill_name,
+            SkillPrompt.action == "*",
+            SkillPrompt.is_active == True,
+        )
+        result = await session.execute(query)
+        prompt = result.scalar_one_or_none()
+
+    if not prompt:
+        return None
+
+    # Update last_used_at
+    prompt.last_used_at = datetime.utcnow()
+    await session.commit()
+
+    return SkillPromptResponse.model_validate(prompt)
+
+
+@router.post("/prompts", response_model=SkillPromptResponse, status_code=status.HTTP_201_CREATED)
+async def create_skill_prompt(
+    data: SkillPromptCreate,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> SkillPromptResponse:
+    """Create a new skill prompt for a canvas."""
+    # Verify canvas exists
+    canvas = await session.get(Canvas, data.canvas_id)
+    if not canvas:
+        raise HTTPException(status_code=404, detail="Canvas not found")
+
+    # Check for existing prompt with same canvas/skill/action
+    query = select(SkillPrompt).where(
+        SkillPrompt.canvas_id == data.canvas_id,
+        SkillPrompt.skill_name == data.skill_name,
+        SkillPrompt.action == data.action,
+    )
+    result = await session.execute(query)
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Prompt already exists for this canvas/skill/action. Use PUT to update."
+        )
+
+    # Create new prompt
+    prompt = SkillPrompt(
+        canvas_id=data.canvas_id,
+        skill_name=data.skill_name,
+        action=data.action,
+        prompt_template=data.prompt_template,
+        created_by=data.created_by,
+    )
+    session.add(prompt)
+    await session.commit()
+    await session.refresh(prompt)
+
+    return SkillPromptResponse.model_validate(prompt)
+
+
+@router.put("/prompts/{prompt_id}", response_model=SkillPromptResponse)
+async def update_skill_prompt(
+    prompt_id: int,
+    data: SkillPromptUpdate,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> SkillPromptResponse:
+    """Update a skill prompt. Saves previous version to history."""
+    prompt = await session.get(SkillPrompt, prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Skill prompt not found")
+
+    # Save to history before updating
+    if data.prompt_template and data.prompt_template != prompt.prompt_template:
+        prompt.save_history()
+        prompt.prompt_template = data.prompt_template
+        prompt.last_edited_by = str(current_user.id)
+
+    if data.is_active is not None:
+        prompt.is_active = data.is_active
+
+    await session.commit()
+    await session.refresh(prompt)
+
+    return SkillPromptResponse.model_validate(prompt)
+
+
+@router.delete("/prompts/{prompt_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_skill_prompt(
+    prompt_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """Delete a skill prompt."""
+    prompt = await session.get(SkillPrompt, prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Skill prompt not found")
+
+    await session.delete(prompt)
+    await session.commit()
+
+
+@router.post("/prompts/{prompt_id}/revert/{version}", response_model=SkillPromptResponse)
+async def revert_skill_prompt(
+    prompt_id: int,
+    version: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> SkillPromptResponse:
+    """Revert a skill prompt to a previous version."""
+    prompt = await session.get(SkillPrompt, prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Skill prompt not found")
+
+    # Find the version in history
+    history_entry = None
+    for entry in (prompt.history or []):
+        if entry.get("version") == version:
+            history_entry = entry
+            break
+
+    if not history_entry:
+        raise HTTPException(status_code=404, detail=f"Version {version} not found in history")
+
+    # Save current version to history, then revert
+    prompt.save_history()
+    prompt.prompt_template = history_entry["prompt"]
+    prompt.last_edited_by = str(current_user.id)
+
+    await session.commit()
+    await session.refresh(prompt)
+
+    return SkillPromptResponse.model_validate(prompt)

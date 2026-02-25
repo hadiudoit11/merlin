@@ -162,10 +162,10 @@ async def zoom_oauth_callback(
             tokens=tokens,
         )
 
-        # Redirect to frontend success page
+        # Redirect to frontend callback page (handles popup close + parent notification)
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/settings/skills?zoom=connected"
+            url=f"{frontend_url}/auth/callback?zoom=connected"
         )
 
     except ZoomError as e:

@@ -281,16 +281,16 @@ async def jira_oauth_callback(
             scope=scope,
         )
 
-        # Redirect to frontend success page
+        # Redirect to frontend callback page (handles popup close + parent notification)
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/skills?jira=connected&scope={scope}"
+            url=f"{frontend_url}/auth/callback?jira=connected&scope={scope}"
         )
 
     except JiraError as e:
         frontend_url = settings.CORS_ORIGINS[0] if settings.CORS_ORIGINS else "http://localhost:3000"
         return RedirectResponse(
-            url=f"{frontend_url}/skills?jira=error&message={str(e)}"
+            url=f"{frontend_url}/auth/callback?jira=error&message={str(e)}"
         )
 
 
