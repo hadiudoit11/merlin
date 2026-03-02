@@ -97,17 +97,31 @@ async def get_user_organization(
 
 async def get_skill(
     session: AsyncSession,
-    organization_id: int,
-    provider: ModelProvider
+    organization_id: Optional[int],
+    provider: ModelProvider,
+    user_id: Optional[int] = None,
 ) -> Optional[Skill]:
-    """Get skill by provider for an organization."""
-    result = await session.execute(
-        select(Skill)
-        .where(
-            Skill.organization_id == organization_id,
-            Skill.provider == provider
+    """Get skill by provider for an organization or individual user."""
+    if organization_id:
+        result = await session.execute(
+            select(Skill)
+            .where(
+                Skill.organization_id == organization_id,
+                Skill.provider == provider
+            )
         )
-    )
+    elif user_id:
+        # Individual user: no org
+        result = await session.execute(
+            select(Skill)
+            .where(
+                Skill.user_id == user_id,
+                Skill.organization_id == None,
+                Skill.provider == provider
+            )
+        )
+    else:
+        return None
     return result.scalar_one_or_none()
 
 
@@ -269,10 +283,20 @@ async def initiate_confluence_oauth(
             detail="Confluence skill is not configured"
         )
 
-    org = await get_user_organization(session, current_user.id, organization_id)
+    # Try to get org; individual users won't have one
+    org = None
+    try:
+        org = await get_user_organization(session, current_user.id, organization_id)
+    except HTTPException:
+        pass  # Individual user — that's fine
 
     # Check if already connected
-    existing = await get_skill(session, org.id, ModelProvider.CONFLUENCE)
+    existing = await get_skill(
+        session,
+        org.id if org else None,
+        ModelProvider.CONFLUENCE,
+        user_id=current_user.id,
+    )
     if existing and existing.is_connected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -285,7 +309,7 @@ async def initiate_confluence_oauth(
 
     # Store state with org/user info (expires in 10 minutes)
     _oauth_states[state] = {
-        "organization_id": org.id,
+        "organization_id": org.id if org else None,
         "user_id": current_user.id,
         "expires_at": datetime.utcnow() + timedelta(minutes=10),
     }
@@ -321,7 +345,7 @@ async def confluence_oauth_callback(
             detail="OAuth state has expired"
         )
 
-    organization_id = state_data["organization_id"]
+    organization_id = state_data.get("organization_id")  # Can be None for individual
     user_id = state_data["user_id"]
 
     try:
@@ -352,7 +376,7 @@ async def confluence_oauth_callback(
         await service.close()
 
         # Create or update skill
-        skill = await get_skill(session, organization_id, ModelProvider.CONFLUENCE)
+        skill = await get_skill(session, organization_id, ModelProvider.CONFLUENCE, user_id=user_id)
 
         if skill:
             skill.access_token = access_token
@@ -368,6 +392,7 @@ async def confluence_oauth_callback(
         else:
             skill = Skill(
                 organization_id=organization_id,
+                user_id=user_id if not organization_id else None,
                 provider=ModelProvider.CONFLUENCE,
                 access_token=access_token,
                 refresh_token=refresh_token,
