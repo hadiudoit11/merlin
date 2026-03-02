@@ -17,6 +17,9 @@ class SkillProvider(str, Enum):
     NOTION = "notion"
     GOOGLE_DOCS = "google_docs"
     GITHUB = "github"
+    ZOOM = "zoom"
+    JIRA = "jira"
+    GOOGLE_CALENDAR = "google_calendar"
 
 
 class SyncDirection(str, Enum):
@@ -313,3 +316,65 @@ class SlackSearchResult(BaseModel):
     total: int
     page: int
     pages: int
+
+
+# ============ Skill Prompts ============
+
+class SkillPromptCreate(BaseModel):
+    """Create a skill prompt."""
+    canvas_id: int
+    skill_name: str
+    action: str = "*"
+    prompt_template: str
+    created_by: Optional[str] = None
+
+
+class SkillPromptUpdate(BaseModel):
+    """Update a skill prompt."""
+    prompt_template: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class SkillPromptBrief(BaseModel):
+    """Brief skill prompt info for lists."""
+    id: int
+    canvas_id: int
+    skill_name: str
+    action: str
+    is_active: bool
+    last_used_at: Optional[datetime] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SkillPromptResponse(BaseModel):
+    """Full skill prompt response."""
+    id: int
+    canvas_id: int
+    skill_name: str
+    action: str
+    prompt_template: str
+    is_active: bool
+    created_by: Optional[str] = None
+    last_edited_by: Optional[str] = None
+    last_used_at: Optional[datetime] = None
+    history: List[Dict[str, Any]] = []
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SkillPromptGenerateRequest(BaseModel):
+    """Request to generate content using a skill prompt."""
+    prompt_id: int
+    context: Dict[str, Any] = {}
+
+
+class SkillPromptGenerateResponse(BaseModel):
+    """Response from generating content with a skill prompt."""
+    content: str
+    prompt_used: str

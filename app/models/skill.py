@@ -222,6 +222,46 @@ class PageSync(Base):
     space_skill = relationship("SpaceSkill", back_populates="page_syncs")
 
 
+class SkillPrompt(Base):
+    """
+    Canvas-specific agent prompts for skills.
+
+    Stores customizable prompt templates per canvas/skill/action.
+    Supports version history and revert.
+    """
+    __tablename__ = "skill_prompts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    canvas_id = Column(Integer, ForeignKey("canvases.id", ondelete="CASCADE"), nullable=False, index=True)
+    skill_name = Column(String(100), nullable=False)
+    action = Column(String(100), nullable=False, default="*")
+    prompt_template = Column(Text, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_by = Column(String(255), nullable=True)
+    last_edited_by = Column(String(255), nullable=True)
+    last_used_at = Column(DateTime, nullable=True)
+    history = Column(JSON, default=list)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    canvas = relationship("Canvas", backref="skill_prompts")
+
+    def save_history(self):
+        """Save current version to history before updating."""
+        if self.history is None:
+            self.history = []
+        version = len(self.history) + 1
+        self.history = [
+            *self.history,
+            {
+                "version": version,
+                "prompt": self.prompt_template,
+                "edited_by": self.last_edited_by,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        ]
+
+
 class MeetingImport(Base):
     """
     Tracks imported meetings from Zoom (or other video conferencing).

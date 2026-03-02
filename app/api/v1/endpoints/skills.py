@@ -170,12 +170,36 @@ async def list_skills(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> List[SkillBrief]:
-    """List all skills for the organization."""
-    org = await get_user_organization(session, current_user.id, organization_id)
+    """List all skills for the user. Supports org members and individual users."""
+    from sqlalchemy import or_
 
-    result = await session.execute(
-        select(Skill).where(Skill.organization_id == org.id)
-    )
+    # Try to get user's organization (returns None instead of 404 for individual users)
+    org = None
+    try:
+        org = await get_user_organization(session, current_user.id, organization_id)
+    except HTTPException:
+        pass  # User has no org — that's fine, we'll query individual skills
+
+    if org:
+        # Org member: get org-level skills + personal overrides
+        result = await session.execute(
+            select(Skill).where(
+                Skill.organization_id == org.id,
+                or_(
+                    Skill.user_id == None,  # Org-level shared skills
+                    Skill.user_id == current_user.id,  # Personal overrides
+                )
+            )
+        )
+    else:
+        # Individual user: get skills where user_id matches and no org
+        result = await session.execute(
+            select(Skill).where(
+                Skill.user_id == current_user.id,
+                Skill.organization_id == None,
+            )
+        )
+
     skills = result.scalars().all()
 
     return [

@@ -449,6 +449,24 @@ async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+@router.get("/check-verification")
+async def check_verification(
+    email: str,
+    session: AsyncSession = Depends(get_session)
+):
+    """Check if a user's email is verified. Used by frontend to detect stale JWT sessions."""
+    result = await session.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    return {"email": user.email, "email_verified": user.email_verified}
+
+
 @router.post("/verify-email")
 async def verify_email(
     token: str,
