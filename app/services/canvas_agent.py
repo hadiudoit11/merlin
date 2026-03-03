@@ -17,7 +17,10 @@ from app.models.node import Node, NodeConnection
 from app.models.canvas import Canvas
 from app.models.project import Project, WorkflowStage
 from app.models.artifact import Artifact, ArtifactType
+from app.models.skill import Skill, SkillProvider
 from app.services.settings_service import SettingsService
+from app.services.jira import JiraService, JiraSkillService, JiraError
+from app.services.confluence import ConfluenceService
 
 
 class CanvasAgentError(Exception):
@@ -217,6 +220,77 @@ CANVAS_TOOLS = [
             },
             "required": []
         }
+    },
+    {
+        "name": "search_jira_issues",
+        "description": (
+            "Search Jira issues using JQL. Use this to find relevant issues, bugs, or tasks."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "jql": {
+                    "type": "string",
+                    "description": "JQL query string (e.g. 'project = PROJ AND status != Done')"
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 10)"
+                }
+            },
+            "required": ["jql"]
+        }
+    },
+    {
+        "name": "get_jira_issue",
+        "description": (
+            "Get details of a specific Jira issue including description and comments."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "issue_key": {
+                    "type": "string",
+                    "description": "Jira issue key (e.g. 'PROJ-123')"
+                }
+            },
+            "required": ["issue_key"]
+        }
+    },
+    {
+        "name": "search_confluence_pages",
+        "description": (
+            "List Confluence spaces or pages in a specific space. "
+            "Omit space_key to list all available spaces."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "space_key": {
+                    "type": "string",
+                    "description": "Confluence space key (omit to list all spaces)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 20)"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "get_confluence_page",
+        "description": "Get a Confluence page's content by page ID.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "page_id": {
+                    "type": "string",
+                    "description": "Confluence page ID"
+                }
+            },
+            "required": ["page_id"]
+        }
     }
 ]
 
@@ -233,6 +307,8 @@ You can create and manage:
 - **Artifacts** — documents linked to projects: PRD, Tech Spec, UX Design, Timeline, Test Plan, Meeting Notes, Research Notes
 - **Nodes** — visual elements on the canvas: problem, objective, keyresult, metric, doc
 - **Connections** — links between nodes following the hierarchy: problem→objective→keyresult→metric
+- **Jira** — search issues, read issue details (when Jira is connected)
+- **Confluence** — browse spaces, read pages (when Confluence is connected)
 
 ## Node Types
 - **problem**: A problem statement or challenge to solve
@@ -259,6 +335,11 @@ Start with `create_canvas`, then `create_project`, then add a couple of problem/
 
 ## When Inside a Canvas
 Use `get_canvas_state` first to understand existing context, then make targeted improvements.
+
+## Connected Integrations
+If the user has Jira or Confluence connected, you can search and read their data.
+Use `search_jira_issues` with JQL to find issues. Use `search_confluence_pages` to browse.
+If a tool returns "not connected", let the user know they can connect it from the canvas.
 
 Always confirm what you've done and suggest the next logical step."""
 
@@ -303,7 +384,7 @@ class CanvasAgent:
                 },
                 json={
                     "model": model,
-                    "max_tokens": 4096,
+                    "max_tokens": 8192,
                     "system": SYSTEM_PROMPT,
                     "messages": messages,
                     "tools": tools,
@@ -355,6 +436,22 @@ class CanvasAgent:
 
         elif tool_name == "delete_node":
             return await self._tool_delete_node(session, effective_canvas_id, tool_input["node_id"])
+
+        elif tool_name == "search_jira_issues":
+            return await self._tool_search_jira(
+                session, user_id, tool_input["jql"], tool_input.get("max_results", 10)
+            )
+
+        elif tool_name == "get_jira_issue":
+            return await self._tool_get_jira_issue(session, user_id, tool_input["issue_key"])
+
+        elif tool_name == "search_confluence_pages":
+            return await self._tool_search_confluence(
+                session, user_id, tool_input.get("space_key"), tool_input.get("limit", 20)
+            )
+
+        elif tool_name == "get_confluence_page":
+            return await self._tool_get_confluence_page(session, user_id, tool_input["page_id"])
 
         else:
             return {"success": False, "error": f"Unknown tool: {tool_name}"}
@@ -604,6 +701,206 @@ class CanvasAgent:
         return {"success": True, "deleted_node": node_name}
 
     # ------------------------------------------------------------------
+    # Jira tool implementations
+    # ------------------------------------------------------------------
+
+    async def _get_jira_auth(
+        self, session: AsyncSession, user_id: int
+    ) -> tuple[str, str]:
+        """Get valid Jira access token and cloud_id, or raise."""
+        jira_skill_svc = JiraSkillService()
+        integration = await jira_skill_svc.get_integration(session, user_id=user_id)
+        if not integration:
+            raise CanvasAgentError("Jira not connected")
+        access_token = await jira_skill_svc.get_or_refresh_token(session, integration)
+        cloud_id = integration.provider_data["cloud_id"]
+        return access_token, cloud_id
+
+    async def _tool_search_jira(
+        self, session: AsyncSession, user_id: int, jql: str, max_results: int = 10
+    ) -> Dict[str, Any]:
+        """Search Jira issues via JQL."""
+        try:
+            access_token, cloud_id = await self._get_jira_auth(session, user_id)
+        except CanvasAgentError:
+            return {"success": False, "error": "Jira not connected. Connect Jira from the canvas to use this tool."}
+
+        try:
+            data = await JiraService().search_issues(access_token, cloud_id, jql, max_results=max_results)
+            issues = []
+            for raw in data.get("issues", []):
+                fields = raw.get("fields", {})
+                issues.append({
+                    "key": raw.get("key"),
+                    "summary": fields.get("summary"),
+                    "status": (fields.get("status") or {}).get("name"),
+                    "priority": (fields.get("priority") or {}).get("name"),
+                    "assignee": (fields.get("assignee") or {}).get("displayName"),
+                    "type": (fields.get("issuetype") or {}).get("name"),
+                })
+            return {"success": True, "issues": issues, "total": data.get("total", 0)}
+        except JiraError as e:
+            return {"success": False, "error": f"Jira search failed: {e}"}
+
+    async def _tool_get_jira_issue(
+        self, session: AsyncSession, user_id: int, issue_key: str
+    ) -> Dict[str, Any]:
+        """Get details of a specific Jira issue."""
+        try:
+            access_token, cloud_id = await self._get_jira_auth(session, user_id)
+        except CanvasAgentError:
+            return {"success": False, "error": "Jira not connected. Connect Jira from the canvas to use this tool."}
+
+        try:
+            jira_svc = JiraService()
+            raw = await jira_svc.get_issue(access_token, cloud_id, issue_key)
+            fields = raw.get("fields", {})
+
+            # Get description text (truncated)
+            description = ""
+            desc_field = fields.get("description")
+            if isinstance(desc_field, str):
+                description = desc_field[:2000]
+            elif isinstance(desc_field, dict):
+                # ADF format — extract text content
+                parts = []
+                for block in desc_field.get("content", []):
+                    for inline in block.get("content", []):
+                        if inline.get("type") == "text":
+                            parts.append(inline.get("text", ""))
+                description = "\n".join(parts)[:2000]
+
+            # Get last 5 comments
+            comments_data = await jira_svc.get_comments(access_token, cloud_id, issue_key)
+            raw_comments = comments_data if isinstance(comments_data, list) else comments_data.get("comments", [])
+            comments = []
+            for c in raw_comments[-5:]:
+                body = c.get("body", "")
+                if isinstance(body, dict):
+                    # ADF format
+                    parts = []
+                    for block in body.get("content", []):
+                        for inline in block.get("content", []):
+                            if inline.get("type") == "text":
+                                parts.append(inline.get("text", ""))
+                    body = "\n".join(parts)
+                comments.append({
+                    "author": (c.get("author") or {}).get("displayName"),
+                    "body": body[:500] if isinstance(body, str) else str(body)[:500],
+                    "created": c.get("created"),
+                })
+
+            return {
+                "success": True,
+                "key": raw.get("key"),
+                "summary": fields.get("summary"),
+                "description": description,
+                "status": (fields.get("status") or {}).get("name"),
+                "priority": (fields.get("priority") or {}).get("name"),
+                "assignee": (fields.get("assignee") or {}).get("displayName"),
+                "comments": comments,
+            }
+        except JiraError as e:
+            return {"success": False, "error": f"Failed to get Jira issue: {e}"}
+
+    # ------------------------------------------------------------------
+    # Confluence tool implementations
+    # ------------------------------------------------------------------
+
+    async def _get_confluence_service(
+        self, session: AsyncSession, user_id: int
+    ) -> ConfluenceService:
+        """Build an authenticated ConfluenceService, or raise."""
+        result = await session.execute(
+            select(Skill).where(
+                Skill.user_id == user_id,
+                Skill.provider == SkillProvider.CONFLUENCE,
+            )
+        )
+        integration = result.scalar_one_or_none()
+        if not integration or not integration.is_connected:
+            raise CanvasAgentError("Confluence not connected")
+
+        access_token = integration.access_token
+        # Refresh if expired
+        if integration.is_token_expired and integration.refresh_token:
+            svc = ConfluenceService()
+            new_tokens = await svc.refresh_access_token(integration.refresh_token)
+            integration.access_token = new_tokens["access_token"]
+            if new_tokens.get("refresh_token"):
+                integration.refresh_token = new_tokens["refresh_token"]
+            from datetime import datetime, timedelta
+            integration.token_expires_at = datetime.utcnow() + timedelta(
+                seconds=new_tokens.get("expires_in", 3600)
+            )
+            await session.flush()
+            access_token = integration.access_token
+
+        cloud_id = integration.provider_data.get("cloud_id", "")
+        return ConfluenceService(access_token=access_token, cloud_id=cloud_id)
+
+    async def _tool_search_confluence(
+        self, session: AsyncSession, user_id: int,
+        space_key: Optional[str] = None, limit: int = 20
+    ) -> Dict[str, Any]:
+        """List Confluence spaces or pages in a space."""
+        try:
+            svc = await self._get_confluence_service(session, user_id)
+        except CanvasAgentError:
+            return {"success": False, "error": "Confluence not connected. Connect Confluence from the canvas to use this tool."}
+
+        try:
+            if not space_key:
+                spaces = await svc.list_spaces(limit=limit)
+                return {
+                    "success": True,
+                    "spaces": [
+                        {"key": s.key, "name": s.name, "type": s.type}
+                        for s in spaces
+                    ],
+                }
+            else:
+                # Resolve space_key → space_id
+                space = await svc.get_space(space_key)
+                if not space:
+                    return {"success": False, "error": f"Space '{space_key}' not found"}
+                data = await svc.list_pages(space.id, limit=limit)
+                pages = data.get("pages", [])
+                return {
+                    "success": True,
+                    "pages": [
+                        {"id": p.id, "title": p.title, "space_key": space_key}
+                        for p in pages
+                    ],
+                }
+        except Exception as e:
+            return {"success": False, "error": f"Confluence search failed: {e}"}
+
+    async def _tool_get_confluence_page(
+        self, session: AsyncSession, user_id: int, page_id: str
+    ) -> Dict[str, Any]:
+        """Get a Confluence page's content."""
+        try:
+            svc = await self._get_confluence_service(session, user_id)
+        except CanvasAgentError:
+            return {"success": False, "error": "Confluence not connected. Connect Confluence from the canvas to use this tool."}
+
+        try:
+            page = await svc.get_page(page_id, include_body=True)
+            if not page:
+                return {"success": False, "error": f"Page '{page_id}' not found"}
+            body = (page.body_html or "")[:3000]
+            return {
+                "success": True,
+                "id": page.id,
+                "title": page.title,
+                "space_key": page.space_key,
+                "body": body,
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to get Confluence page: {e}"}
+
+    # ------------------------------------------------------------------
     # Main chat loop (non-streaming)
     # ------------------------------------------------------------------
 
@@ -625,6 +922,21 @@ class CanvasAgent:
 
         messages = list(conversation_history or [])
         messages.append({"role": "user", "content": user_message})
+
+        # Auto-inject canvas state for context
+        if canvas_id:
+            state = await self._tool_get_canvas_state(session, canvas_id)
+            if state.get("success") and (state.get("nodes") or state.get("projects")):
+                context_block = json.dumps({
+                    "nodes": state["nodes"],
+                    "connections": state["connections"],
+                    "projects": state["projects"],
+                })
+                messages[-1]["content"] = (
+                    f"[Canvas context — {len(state['nodes'])} nodes, "
+                    f"{len(state['projects'])} projects:\n{context_block}]\n\n"
+                    + messages[-1]["content"]
+                )
 
         actions_taken = []
 
@@ -713,6 +1025,21 @@ class CanvasAgent:
         messages = list(conversation_history or [])
         messages.append({"role": "user", "content": user_message})
 
+        # Auto-inject canvas state for context
+        if canvas_id:
+            state = await self._tool_get_canvas_state(session, canvas_id)
+            if state.get("success") and (state.get("nodes") or state.get("projects")):
+                context_block = json.dumps({
+                    "nodes": state["nodes"],
+                    "connections": state["connections"],
+                    "projects": state["projects"],
+                })
+                messages[-1]["content"] = (
+                    f"[Canvas context — {len(state['nodes'])} nodes, "
+                    f"{len(state['projects'])} projects:\n{context_block}]\n\n"
+                    + messages[-1]["content"]
+                )
+
         response = await self._call_claude(api_key, model, messages, CANVAS_TOOLS)
 
         while response.get("stop_reason") == "tool_use":
@@ -794,6 +1121,17 @@ class CanvasAgent:
         elif tool_name == "get_canvas_state":
             nodes = result.get("nodes", [])
             return f"Retrieved canvas state ({len(nodes)} nodes)"
+        elif tool_name == "search_jira_issues":
+            total = result.get("total", 0)
+            return f"Found {total} Jira issues"
+        elif tool_name == "get_jira_issue":
+            return f"Retrieved Jira issue: {result.get('key', '')}"
+        elif tool_name == "search_confluence_pages":
+            if "spaces" in result:
+                return f"Listed {len(result['spaces'])} Confluence spaces"
+            return f"Listed {len(result.get('pages', []))} Confluence pages"
+        elif tool_name == "get_confluence_page":
+            return f"Retrieved Confluence page: \"{result.get('title', '')}\""
         else:
             return f"Executed {tool_name}"
 
